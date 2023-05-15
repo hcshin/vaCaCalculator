@@ -1,0 +1,6 @@
+.*
+!.gitignore
+tags
+*.json
+venv/*
+__*/*
