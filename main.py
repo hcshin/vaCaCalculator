@@ -12,9 +12,16 @@ from setup_logger import setup_logger
     help='debug level for logger'
 )
 @click.option(
-    '--savings-krw',
-    type=int,
+    '--saving-in-krw',
+    type=float,
     help='amount of money to save in KRW'
+)
+@click.option(
+    '--saving-in-usd',
+    type=float,
+    default=0.0,
+    show_default=True,
+    help='amount of money to save in USD'
 )
 @click.argument(
     'ref_report_path',
@@ -28,15 +35,16 @@ from setup_logger import setup_logger
 )
 def main(
     debug_level,
-    savings_krw,
+    saving_in_krw,
+    saving_in_usd,
     ref_report_path,
     output_report_path
 ):
     logger = setup_logger('autoinvestment_logger', debug_level)
     logger.debug('Program started')
-    my_portfolio = portfolio.Portfolio(ref_report_path, savings_krw)
+    my_portfolio = portfolio.Portfolio(ref_report_path, saving_in_krw, saving_in_usd)
     my_portfolio.distribute_saving()
-    my_portfolio.print_ref_report()
+    my_portfolio.print_this_report()
     my_portfolio.write_report_to_file(output_report_path)
     logger.debug('Program ended')
 

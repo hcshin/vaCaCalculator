@@ -32,7 +32,7 @@ class BaseStock:
 
         return res
 
-    def _derive_appraisement(self):
+    def _update_holdings(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
             if float(stock['holdings']) < 0:
                 logger.error(
@@ -40,51 +40,30 @@ class BaseStock:
                      'which is not in valid range.')
                 )
                 raise ValueError
-            if float(stock['price']) < 0:
-                logger.error(
-                    f'price of {stockkey} is given as {stock["price"]}, which is not in valid range.'
-                )
-                raise ValueError
-
             # take account of manually invested units. add them up into holdings
             if 'actualInvestedInUnits' in stock.keys():
                 stock['holdings'] += stock['actualInvestedInUnits']
 
-            # for domestic: appraisementKRW -> appraisement
-            if stock['currency'] == 'KRW':
-                stock['appraisementKRW'] = float(stock['holdings']) * float(stock['price'])  # prices are in KRW for DOM stocks
-                stock['appraisement'] = stock['appraisementKRW'] / self.exchange_rate
-
-            # for US: appraisement -> appraisementKRW
-            elif stock['currency'] == 'USD':
-                stock['appraisement'] = float(stock['holdings']) * float(stock['price'])  # prices are in USD for US stocks
-                stock['appraisementKRW'] = stock['appraisement'] * self.exchange_rate
-            else:
-                logger.error(f'Currently only KRW or USD are supported as currencies, but {stock["currency"]} given.')
-
     def _update_invested(self):
         '''
-        Currently does not support automatic invested amount collection
+        BaseStock does not support automatic invested amount collection
         Hence, investedInKRW and investedInUSD have to be manually entered in advance
         '''
         for stockkey, stock_value in self.stockgrp_info['stocks'].items():
-            investedInKRW = float(stock_value['investedInKRW'])
-            investedInUSD = float(stock_value['investedInUSD'])
-
-            if investedInKRW < 0:
-                error_msg = f'value of investedInKRW must not be negative, but got {investedInKRW}'
+            # check if the values are valid
+            if stock_value['investedInKRW'] < 0:
+                error_msg = f'value of investedInKRW must not be negative, but got {stock_value["investedInKRW"]}'
                 logger.error(error_msg)
                 raise ValueError
 
-            if investedInUSD < 0:
-                error_msg = f'value of investedInUSD must not be negative, but got {investedInUSD}'
+            if stock_value['investedInUSD'] < 0:
+                error_msg = f'value of investedInUSD must not be negative, but got {stock_value["investedInUSD"]}'
                 logger.error(error_msg)
                 raise ValueError
 
-            stock_value['invested'] = investedInUSD + investedInKRW / self.exchange_rate
-
-            # investment increaments has to be manually added to the output report
-            # parse them if any
+            # investment increaments have to be manually added to the output report
+            # Note that we don't have any price update in BaseStock thus prices are equal to those of ref_report
+            # this makes sense because investment increase should be based on the prices at the time of investment
             if 'actualInvestedInUnits' in stock_value.keys():
                 if stock_value['price'] < 0:
                     logger.error('price has to be collected or manually entered first to use this method')
@@ -100,16 +79,46 @@ class BaseStock:
                     logger.error(f'only KRW and USD are allowed as currency, but {stock_value["currency"]} given')
                     raise ValueError
 
+            stock_value['invested'] = \
+                stock_value['investedInUSD'] + stock_value['investedInKRW'] / self.exchange_rate
+
     def _cleanup_manual_investment(self):
         # clean up manually recored investments of previous report
         for stock_value in self.stockgrp_info['stocks'].values():
             if 'actualInvestedInUnits' in stock_value.keys():
                 del stock_value['actualInvestedInUnits']
 
-    def update_all(self):
-        self._derive_appraisement()
-        self._update_invested()
+    def _derive_appraisement(self):
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            if float(stock['price']) < 0:
+                logger.error(
+                    f'price of {stockkey} is given as {stock["price"]}, which is not in valid range.'
+                )
+                raise ValueError
+            if float(stock['holdings']) < 0:
+                logger.error(
+                    (f'holdings of {stockkey} is given as {stock["holdings"]},'
+                     'which is not in valid range.')
+                )
+                raise ValueError
+
+            # for domestic: appraisementKRW -> appraisement
+            if stock['currency'] == 'KRW':
+                stock['appraisementKRW'] = float(stock['holdings']) * float(stock['price'])  # prices are in KRW for DOM stocks
+                stock['appraisement'] = stock['appraisementKRW'] / self.exchange_rate
+
+            # for US: appraisement -> appraisementKRW
+            elif stock['currency'] == 'USD':
+                stock['appraisement'] = float(stock['holdings']) * float(stock['price'])  # prices are in USD for US stocks
+                stock['appraisementKRW'] = stock['appraisement'] * self.exchange_rate
+            else:
+                logger.error(f'Currently only KRW or USD are supported as currencies, but {stock["currency"]} given.')
+
+    def update_all(self):  # call order is crucial
+        self._update_holdings()  # before _cleanup_manual_investment and _derive_appraisement
+        self._update_invested()  # before _cleanup_manual_investment and _derive_appraisement
         self._cleanup_manual_investment()
+        self._derive_appraisement()  # after _update_holdings and _update_invested
 
     def get_stockgrp(self) -> dict:
         return self.stockgrp_info
@@ -310,6 +319,15 @@ class KisStock(BaseStock):
             stocks = res.json()['output1']
             for stock in stocks:
                 stockkey = stock['pdno']
+
+                # check if there's any actualInvestedInUnits within ref_report
+                # if there're any, delete them and print errors
+                if 'actualInvestedInUnits' in self.stockgrp_info['stocks'][stockkey].keys():
+                    logger.warning(('actualInvestedInUnits items are not needed for KisStock items, '
+                                    f'but given with item: {stockkey}. '
+                                    'ignoring and deleting them from this_report'))
+                    del self.stockgrp_info['stocks'][stockkey]['actualInvestedInUnits']
+
                 self.stockgrp_info['stocks'][stockkey]['holdings'] = int(stock['hldg_qty'])
                 # invested should be in BASE_CURRENCY
                 self.stockgrp_info['stocks'][stockkey]['invested'] = float(stock['pchs_amt']) / self.exchange_rate
@@ -355,6 +373,15 @@ class KisStock(BaseStock):
             stocks = res.json()['output1']
             for stock in stocks:
                 stockkey = stock['ovrs_pdno']
+
+                # check if there's any actualInvestedInUnits within ref_report
+                # if there're any, delete them and print errors
+                if 'actualInvestedInUnits' in self.stockgrp_info['stocks'][stockkey].keys():
+                    logger.warning(('actualInvestedInUnits items are not needed for KisStock items, '
+                                    f'but given with item: {stockkey}. '
+                                    'ignoring and deleting them from this_report'))
+                    del self.stockgrp_info['stocks'][stockkey]['actualInvestedInUnits']
+
                 self.stockgrp_info['stocks'][stockkey]['holdings'] = int(stock['ovrs_cblc_qty'])
                 self.stockgrp_info['stocks'][stockkey]['invested'] = float(stock['frcr_pchs_amt1'])
 
@@ -372,11 +399,11 @@ class KisStock(BaseStock):
         logger.error('KisStock does not support _update_invested. use _collect_holdings_and_invested instead')
         raise NotImplementedError
 
-    def update_all(self):
-        self._issue_access_token()
-        self._collect_prices()
-        self._collect_holdings_and_invested()
-        self._derive_appraisement()
+    def update_all(self):  # call order is crucial
+        self._issue_access_token()  # before _collect_prices, and _collect_holdings_and_invested
+        self._collect_prices()  # before _discard_access_token
+        self._collect_holdings_and_invested()  # before _discard_access_token
+        self._derive_appraisement()  # after _issue_access_token and _collect_international_prices
         self._discard_access_token()
 
 
@@ -484,13 +511,14 @@ class GeckoStock(BaseStock):
                     'Consider using forein exchanges'
                 )
 
-    def update_all(self):
+    def update_all(self):  # call order is crucial
+        self._update_holdings()  # before _cleanup_manual_investment and _derive_kimchi_premium
+        self._update_invested()  # before _cleanup_manual_investment, price collections, and _derive_kimchi_premium
+        self._cleanup_manual_investment()
         self._collect_international_prices()
         self._collect_domestic_prices()
-        self._derive_kimchi_premium()
-        self._update_invested()
-        self._derive_appraisement()
-        self._cleanup_manual_investment()
+        self._derive_kimchi_premium()  # after _collect_international_prices and _collect_domestic_prices
+        self._derive_appraisement()  # after _update_holdings, _update_invested, and prices collections
 
 
 class KrxStock(BaseStock):
@@ -557,9 +585,10 @@ class KrxStock(BaseStock):
                 logger.error(error_msg)
                 raise Exception(error_msg)
 
-    def update_all(self):
-        self._collect_otp()
-        self._collect_prices()
-        self._derive_appraisement()
-        self._update_invested()
+    def update_all(self):  # call order is crucial
+        self._update_holdings()  # before _cleanup_manual_investment and _derive_appraisement
+        self._update_invested()  # before _cleanup_manual_investment, _collect_prices, and _derive_appraisement
         self._cleanup_manual_investment()
+        self._collect_otp()  # before _collect_prices
+        self._collect_prices()
+        self._derive_appraisement()  # after _update_holdings, _update_invested, and _collect_prices
