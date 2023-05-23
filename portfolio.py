@@ -93,7 +93,7 @@ class Portfolio:
         table_header = ('stock',
                         'targetweight',
                         'cur_weight',
-                        'invested',
+                        'cumSumCaInvested',
                         'appraisement',
                         'need2invest',
                         'need2investInUnits',
@@ -106,7 +106,7 @@ class Portfolio:
                     table_data.append((stockkey,
                                        stock['weight'],
                                        f'{stock["appraisement"] / self.this_report["total_appraisement"]:.2f}',
-                                       f'{stock["invested"]:.2f}',
+                                       f'{stock["cumSumCaInvested"]:.2f}',
                                        f'{stock["appraisement"]:.2f}',
                                        f'{stock["need2invest"]:.2f}',
                                        f'{stock["need2investInUnits"]:.8f}',
@@ -116,7 +116,7 @@ class Portfolio:
                     table_data.append((stockkey,
                                        stock['weight'],
                                        f'{stock["appraisement"] / self.this_report["total_appraisement"]:.2f}',
-                                       f'{stock["invested"]:.2f}',
+                                       f'{stock["cumSumCaInvested"]:.2f}',
                                        f'{stock["appraisement"]:.2f}',
                                        f'{stock["need2invest"]:.2f}',
                                        f'{stock["need2investInUnits"]}',
@@ -140,10 +140,17 @@ class Portfolio:
                 ref_stock = ref_stockgroup['stocks'][stockkey]
                 this_stock = this_stockgroup['stocks'][stockkey]
 
-                if ref_stock['invested'] < 0:
-                    actual_inv_increment = 0.0  # assume actual_investment == 0 if ref_report has no record of invested amount
-                else:
-                    actual_inv_increment = this_stock['invested'] - ref_stock['invested']
+                # for holdings
+                actualInvestedInUnits = this_stock['holdings'] - ref_stock['holdings']
+
+                # for prices
+                if 'price' in ref_stock.keys():
+                    actual_inv_increment = ref_stock['price'] * actualInvestedInUnits
+                else:  # if ref_stock does not have price info, use that of this_stock instead
+                    actual_inv_increment = this_stock['price'] * actualInvestedInUnits
+                # if currency is KRW divide actual_inv_increment by exchange_rate
+                if this_stock['currency'] == 'KRW':
+                    actual_inv_increment /= self.exchange_rate
 
                 if 'need2invest' in ref_stock.keys():
                     inv_deviation = ref_stock['need2invest'] - actual_inv_increment
@@ -182,6 +189,25 @@ class Portfolio:
         for stockgroupkey, stockgroup in self.this_report['stockgroups'].items():
             for stockkey, stock in stockgroup['stocks'].items():
                 stock['need2investCA'] = self.this_report['saving'] * stock['weight']
+
+                # add up need2investCA to cumSumCaInvested
+                if 'cumSumCaInvested' in stock.keys():
+                    stock['cumSumCaInvested'] += stock['need2investCA']
+                else:
+                    # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
+                    # use appraisement as previous cumSumCaInvested
+                    if 'cumSumCaInvestedInKRW' not in stock.keys() and 'cumSumCaInvestedInUSD' not in stock.keys():
+                        stock['cumSumCaInvested'] = stock['appraisement'] + stock['need2investCA']
+                    # in case either cumSumCaInvestedInKRW or cumSumCaInvestedInUSD exists, use them instead
+                    else:
+                        stock['cumSumCaInvested'] = stock['need2investCA']
+                        if 'cumSumCaInvestedInKRW' in stock.keys():
+                            stock['cumSumCaInvested'] += stock['cumSumCaInvestedInKRW'] / self.exchange_rate
+                            del stock['cumSumCaInvestedInKRW']
+                        if 'cumSumCaInvestedInUSD' in stock.keys():
+                            stock['cumSumCaInvested'] += stock['cumSumCaInvestedInUSD']
+                            del stock['cumSumCaInvestedInUSD']
+
                 stock['need2invest'] = stock['need2investCA']
 
     def _distribute_saving_VA(self):
@@ -192,10 +218,13 @@ class Portfolio:
         for stockgroupkey, stockgroup in self.this_report['stockgroups'].items():
             for stockkey, stock in stockgroup['stocks'].items():
                 # derive VA amount
-                stock['need2investVA'] = stock['invested'] - stock['appraisement']
+                #   cumSumCaInvested: cumulative sum of CA invested amount.
+                #                     this has nothing to do with actual investment because this is an ideal target to follow
+                #   need2investVA: difference between ideal target from current actual appraisement
+                stock['need2investVA'] = stock['cumSumCaInvested'] - stock['appraisement']
 
-                # overwrite need2invest as CA + VA amount
-                stock['need2invest'] = stock['need2investCA'] + stock['need2investVA']
+                # overwrite need2invest as need2investVA
+                stock['need2invest'] = stock['need2investVA']
 
     def print_ref_report(self):
         logger.debug('print_ref_report called')
