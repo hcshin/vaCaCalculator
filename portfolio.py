@@ -174,12 +174,12 @@ class Portfolio:
                             stock['need2invest'] / (stock['price'] / self.this_report['exchange_rate'])
                     else:
                         stock['need2investInUnits'] = \
-                            round(stock['need2invest'] // (stock['price'] / self.this_report['exchange_rate']))
+                            round(stock['need2invest'] / (stock['price'] / self.this_report['exchange_rate']))
                 elif stock['currency'] == 'USD':
                     if stockgroupkey == 'CoinGecko':  # Cryptocurrencies can be fractionally invested
                         stock['need2investInUnits'] = stock['need2invest'] / stock['price']
                     else:
-                        stock['need2investInUnits'] = round(stock['need2invest'] // stock['price'])
+                        stock['need2investInUnits'] = round(stock['need2invest'] / stock['price'])
                 else:
                     logger.error(f'only supports KRW and USD as currency, but {stock["currency"]} given')
                     raise NotImplementedError
