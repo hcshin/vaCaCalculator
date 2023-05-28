@@ -14,6 +14,8 @@ from setup_logger import setup_logger
 @click.option(
     '--saving-in-krw',
     type=float,
+    default=0,
+    show_default=True,
     help='amount of money to save in KRW'
 )
 @click.option(
@@ -22,6 +24,11 @@ from setup_logger import setup_logger
     default=0.0,
     show_default=True,
     help='amount of money to save in USD'
+)
+@click.option(
+    '--print-report',
+    is_flag=True,
+    help='whether to print investment report(s)'
 )
 @click.argument(
     'ref_report_path',
@@ -32,20 +39,39 @@ from setup_logger import setup_logger
     'output_report_path',
     type=click.Path(dir_okay=False, writable=True),
     nargs=1,
+    required=False
 )
 def main(
     debug_level,
     saving_in_krw,
     saving_in_usd,
+    print_report,
     ref_report_path,
     output_report_path
 ):
     logger = setup_logger('autoinvestment_logger', debug_level)
     logger.debug('Program started')
+
     my_portfolio = portfolio.Portfolio(ref_report_path, saving_in_krw, saving_in_usd)
-    my_portfolio.distribute_saving()
-    my_portfolio.print_this_report()
-    my_portfolio.write_report_to_file(output_report_path)
+
+    if output_report_path is None:
+        if not print_report:
+            logger.error('--print-report flag must be given when not giving output_report_path')
+            raise Exception
+        else:
+            logger.info('no output_report_path given, just printing given reference report.')
+            my_portfolio.print_ref_report()
+
+    else:
+        my_portfolio.distribute_saving()
+        my_portfolio.write_report_to_file(output_report_path)
+
+        if print_report:
+            print('Reference Report\n' + '-'*40)
+            my_portfolio.print_ref_report()
+            print('\nDerived Report\n' + '-'*40)
+            my_portfolio.print_this_report()
+
     logger.debug('Program ended')
 
 

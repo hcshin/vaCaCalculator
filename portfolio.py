@@ -86,42 +86,59 @@ class Portfolio:
 
         print(f'Strategy: {report_to_print["strategy"]}')
 
-        # get total_appraisement for printing
-        self._derive_total_appraisement()
-        print(f'Total Appraisement: {self.this_report["total_appraisement"]:.2f}')
+        # print total_appraisement if available
+        if 'total_appraisement' in report_to_print.keys():
+            print(f'Total Appraisement: {report_to_print["total_appraisement"]:.2f}')
 
         table_header = ('stock',
-                        'targetweight',
-                        'cur_weight',
-                        'cumSumCaInvested',
+                        'priceUsd',
+                        'holdings',
                         'appraisement',
+                        'cumSumCaInvested',
                         'need2invest',
                         'need2investInUnits',
+                        'targetweight',
+                        'cur_weight',
                         'cum_inv_deviation'
                         )
         table_data = []
         for stockgroupkey, stockgroup in report_to_print['stockgroups'].items():
             for stockkey, stock in stockgroup['stocks'].items():
-                if stockgroupkey == 'CoinGecko':  # print fractional units for cryptocurrencies
-                    table_data.append((stockkey,
-                                       stock['weight'],
-                                       f'{stock["appraisement"] / self.this_report["total_appraisement"]:.2f}',
-                                       f'{stock["cumSumCaInvested"]:.2f}',
-                                       f'{stock["appraisement"]:.2f}',
-                                       f'{stock["need2invest"]:.2f}',
-                                       f'{stock["need2investInUnits"]:.8f}',
-                                       f'{stock["cum_inv_deviation"]:.2f}'
-                                       ))
-                else:
-                    table_data.append((stockkey,
-                                       stock['weight'],
-                                       f'{stock["appraisement"] / self.this_report["total_appraisement"]:.2f}',
-                                       f'{stock["cumSumCaInvested"]:.2f}',
-                                       f'{stock["appraisement"]:.2f}',
-                                       f'{stock["need2invest"]:.2f}',
-                                       f'{stock["need2investInUnits"]}',
-                                       f'{stock["cum_inv_deviation"]:.2f}'
-                                       ))
+                # get priceUsd value prepared
+                priceUsd = 'N/A'
+                if 'price' in stock.keys():
+                    priceUsd = stock['price']
+                    if stock['currency'] == 'KRW':
+                        priceUsd /= self.exchange_rate
+
+                table_data.append([
+                    stockkey,
+                    f'{priceUsd:.2f}'
+                    if isinstance(priceUsd, float) else priceUsd,
+                    stock['holdings']
+                    if 'holdings' in stock.keys() else 'N/A',
+                    f'{stock["appraisement"]:.2f}'
+                    if 'appraisement' in stock.keys() else 'N/A',
+                    f'{stock["cumSumCaInvested"]:.2f}'
+                    if 'cumSumCaInvested' in stock.keys() else 'N/A',
+                    f'{stock["need2invest"]:.2f}'
+                    if 'need2invest' in stock.keys() else 'N/A',
+                    f'{stock["need2investInUnits"]}'
+                    if 'need2investInUnits' in stock.keys() else 'N/A',
+                    stock['weight'],
+                    f'{stock["appraisement"] / report_to_print["total_appraisement"]:.2f}'
+                    if 'appraisement' in stock.keys() and 'total_appraisement' in report_to_print.keys()
+                    else 'N/A',
+                    f'{stock["cum_inv_deviation"]:.2f}'
+                    if 'cum_inv_deviation' in stock.keys() else 'N/A',
+                ])
+
+                # print fractional units for cryptocurrencies
+                if stockgroupkey == 'CoinGecko':
+                    if 'holdings' in stock.keys():
+                        table_data[-1][2] = f'{stock["holdings"]:.8f}'
+                    if 'need2investInUnits' in stock.keys():
+                        table_data[-1][-4] = f'{stock["need2investInUnits"]:.8f}'
 
         print(tabulate(table_data,
                        headers=table_header,
@@ -141,7 +158,10 @@ class Portfolio:
                 this_stock = this_stockgroup['stocks'][stockkey]
 
                 # for holdings
-                actualInvestedInUnits = this_stock['holdings'] - ref_stock['holdings']
+                if 'holdings' in ref_stock.keys():
+                    actualInvestedInUnits = this_stock['holdings'] - ref_stock['holdings']
+                else:
+                    actualInvestedInUnits = 0
 
                 # for prices
                 if 'price' in ref_stock.keys():
@@ -193,6 +213,12 @@ class Portfolio:
                 # add up need2investCA to cumSumCaInvested
                 if 'cumSumCaInvested' in stock.keys():
                     stock['cumSumCaInvested'] += stock['need2investCA']
+
+                    # in case cumSumCaInvested is given ignore cumSumCaInvestedInKRW and cumSumCaInvestedInUSD
+                    if 'cumSumCaInvestedInKRW' in stock.keys():
+                        del stock['cumSumCaInvestedInKRW']
+                    if 'cumSumCaInvestedInUSD' in stock.keys():
+                        del stock['cumSumCaInvestedInUSD']
                 else:
                     # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
                     # use appraisement as previous cumSumCaInvested
@@ -286,6 +312,9 @@ class Portfolio:
 
         # derive cumulative deviation from need2invest
         self._derive_cum_inv_deviation()
+
+        # derive total_appraisement
+        self._derive_total_appraisement()
 
     def write_report_to_file(self, fname: str):
         with open(fname, 'w') as ofile:

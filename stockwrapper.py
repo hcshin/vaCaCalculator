@@ -273,6 +273,10 @@ class KisStock(BaseStock):
             for stock in stocks:
                 stockkey = stock['pdno']
 
+                # if the stockkey is not enlisted in stockgrp_info, pass that stock because it's not the target of autoinv
+                if stockkey not in self.stockgrp_info['stocks'].keys():
+                    continue
+
                 # check if each stock has actualInvestedInUnits item and if so print warning
                 if 'actualInvestedInUnits' in self.stockgrp_info['stocks'][stockkey].keys():
                     logger.warning('KisStock does not utilize actualInvestedInUnits, '
@@ -323,6 +327,10 @@ class KisStock(BaseStock):
             stocks = res.json()['output1']
             for stock in stocks:
                 stockkey = stock['ovrs_pdno']
+
+                # if the stockkey is not enlisted in stockgrp_info, pass that stock because it's not the target of autoinv
+                if stockkey not in self.stockgrp_info['stocks'].keys():
+                    continue
 
                 self.stockgrp_info['stocks'][stockkey]['holdings'] = int(stock['ovrs_cblc_qty'])
 
