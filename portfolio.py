@@ -113,7 +113,9 @@ class Portfolio:
 
                 table_data.append([
                     stockkey,
-                    f'{priceUsd:.2f}'
+                    f'{priceUsd:.4f}'  # if stockkey is KRW print up to 4th digit below decimal point
+                    if stockkey == 'KRW' else
+                    f'{priceUsd:.2f}'  # if priceUsd is a float print up to 2nd digit below decimal point
                     if isinstance(priceUsd, float) else priceUsd,
                     stock['holdings']
                     if 'holdings' in stock.keys() else 'N/A',
@@ -210,11 +212,8 @@ class Portfolio:
             for stockkey, stock in stockgroup['stocks'].items():
                 stock['need2investCA'] = self.this_report['saving'] * stock['weight']
 
-                # add up need2investCA to cumSumCaInvested
                 if 'cumSumCaInvested' in stock.keys():
-                    stock['cumSumCaInvested'] += stock['need2investCA']
-
-                    # in case cumSumCaInvested is given ignore cumSumCaInvestedInKRW and cumSumCaInvestedInUSD
+                    # in case cumSumCaInvested is given, ignore cumSumCaInvestedInKRW and cumSumCaInvestedInUSD
                     if 'cumSumCaInvestedInKRW' in stock.keys():
                         del stock['cumSumCaInvestedInKRW']
                     if 'cumSumCaInvestedInUSD' in stock.keys():
@@ -246,8 +245,10 @@ class Portfolio:
                 # derive VA amount
                 #   cumSumCaInvested: cumulative sum of CA invested amount.
                 #                     this has nothing to do with actual investment because this is an ideal target to follow
+                #   need2investCA: the CA amount needed to be invested in the corresponding stock
+                #                  this also has nothing to do with actual investment
                 #   need2investVA: difference between ideal target from current actual appraisement
-                stock['need2investVA'] = stock['cumSumCaInvested'] - stock['appraisement']
+                stock['need2investVA'] = stock['cumSumCaInvested'] + stock['need2investCA'] - stock['appraisement']
 
                 # overwrite need2invest as need2investVA
                 stock['need2invest'] = stock['need2investVA']
@@ -275,26 +276,26 @@ class Portfolio:
         for stockgroupkey, stockgroup in self.ref_report['stockgroups'].items():
             if stockgroupkey == 'KIS':
                 stockgroup_handler = stockwrapper.KisStock(
-                                                        self.this_report['exchange_rate'],
-                                                        copy.deepcopy(stockgroup)
+                    self.this_report['exchange_rate'],
+                    copy.deepcopy(stockgroup)
                 )
 
             elif stockgroupkey == 'CoinGecko':
                 stockgroup_handler = stockwrapper.GeckoStock(
-                                                        self.this_report['exchange_rate'],
-                                                        copy.deepcopy(stockgroup)
+                    self.this_report['exchange_rate'],
+                    copy.deepcopy(stockgroup)
                 )
 
             elif stockgroupkey == 'KRX':
                 stockgroup_handler = stockwrapper.KrxStock(
-                                                        self.this_report['exchange_rate'],
-                                                        copy.deepcopy(stockgroup)
+                    self.this_report['exchange_rate'],
+                    copy.deepcopy(stockgroup)
                 )
 
             else:
                 stockgroup_handler = stockwrapper.BaseStock(
-                                                        self.this_report['exchange_rate'],
-                                                        copy.deepcopy(stockgroup)
+                    self.this_report['exchange_rate'],
+                    copy.deepcopy(stockgroup)
                 )
 
             stockgroup_handler.update_all()
