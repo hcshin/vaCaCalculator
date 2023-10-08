@@ -67,9 +67,9 @@ def main(
         my_portfolio.write_report_to_file(output_report_path)
 
         if print_report:
-            print('Reference Report\n' + '-'*40)
+            print('Reference Report\n' + '-' * 40)
             my_portfolio.print_ref_report()
-            print('\nDerived Report\n' + '-'*40)
+            print('\nDerived Report\n' + '-' * 40)
             my_portfolio.print_this_report()
 
     logger.debug('Program ended')

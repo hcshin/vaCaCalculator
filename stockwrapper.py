@@ -138,9 +138,9 @@ class KisStock(BaseStock):
         access_token_issue_path = 'oauth2/tokenP'
         access_token_issue_url = f'{KisStock.URL_BASE}/{access_token_issue_path}'
         access_token_issue_res = self._postWrapper(
-                                                    access_token_issue_url,
-                                                    access_token_issue_headers,
-                                                    access_token_issue_body
+            access_token_issue_url,
+            access_token_issue_headers,
+            access_token_issue_body
         )
         self.access_token = access_token_issue_res.json()['access_token']
 
@@ -154,9 +154,9 @@ class KisStock(BaseStock):
         access_token_discard_path = 'oauth2/revokeP'
         access_token_discard_url = f'{KisStock.URL_BASE}/{access_token_discard_path}'
         self._postWrapper(
-                        access_token_discard_url,
-                        access_token_discard_headers,
-                        access_token_discard_body
+            access_token_discard_url,
+            access_token_discard_headers,
+            access_token_discard_body
         )
         self.access_token = None
 
@@ -180,8 +180,8 @@ class KisStock(BaseStock):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
             if stock['market'] == 'DOM':
                 price_inquiry_params = {
-                                        'fid_cond_mrkt_div_code': 'J',
-                                        'fid_input_iscd': stockkey
+                    'fid_cond_mrkt_div_code': 'J',
+                    'fid_input_iscd': stockkey
                 }
                 res = self._getWrapper(dom_price_inquiry_url, dom_price_inquiry_headers, price_inquiry_params)
 
@@ -195,9 +195,9 @@ class KisStock(BaseStock):
 
             elif stock['market'] == 'NYS' or stock['market'] == 'NAS' or stock['market'] == 'AMS':
                 price_inquiry_params = {
-                                        'AUTH': '',
-                                        'EXCD': stock['market'],
-                                        'SYMB': stockkey
+                    'AUTH': '',
+                    'EXCD': stock['market'],
+                    'SYMB': stockkey
                 }
                 daytime_tried = False
                 while True:
@@ -244,17 +244,17 @@ class KisStock(BaseStock):
         dom_holdings_inquiry_headers['appsecret'] = self.APP_SECRET
         dom_holdings_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_DOM_HOLDINGS
         dom_holdings_inquiry_params = {
-                                        'CANO': self.CANO,
-                                        'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
-                                        'AFHR_FLPR_YN': KisStock.AFHR_FLPR_YN,
-                                        'OFL_YN': KisStock.OFL_YN,
-                                        'INQR_DVSN': KisStock.INQR_DVSN,
-                                        'UNPR_DVSN': KisStock.UNPR_DVSN,
-                                        'FUND_STTL_ICLD_YN': KisStock.FUND_STTL_ICLD_YN,
-                                        'FNCG_AMT_AUTO_RDPT_YN': KisStock.FNCG_AMT_AUTO_RDPT_YN,
-                                        'PRCS_DVSN': KisStock.PRCS_DVSN,
-                                        'CTX_AREA_FK100': '',
-                                        'CTX_AREA_NK100': ''
+            'CANO': self.CANO,
+            'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
+            'AFHR_FLPR_YN': KisStock.AFHR_FLPR_YN,
+            'OFL_YN': KisStock.OFL_YN,
+            'INQR_DVSN': KisStock.INQR_DVSN,
+            'UNPR_DVSN': KisStock.UNPR_DVSN,
+            'FUND_STTL_ICLD_YN': KisStock.FUND_STTL_ICLD_YN,
+            'FNCG_AMT_AUTO_RDPT_YN': KisStock.FNCG_AMT_AUTO_RDPT_YN,
+            'PRCS_DVSN': KisStock.PRCS_DVSN,
+            'CTX_AREA_FK100': '',
+            'CTX_AREA_NK100': ''
         }
 
         # query the holdings
@@ -305,12 +305,12 @@ class KisStock(BaseStock):
         us_holdings_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_US_HOLDINGS_REAL
         us_holdings_inquiry_headers['custtype'] = 'P'  # Private Customer
         us_holdings_inquiry_params = {
-                                        'CANO': self.CANO,
-                                        'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
-                                        'OVRS_EXCG_CD': KisStock.OVRS_EXCG_CD,
-                                        'TR_CRCY_CD': KisStock.TR_CRCY_CD,
-                                        'CTX_AREA_FK200': '',
-                                        'CTX_AREA_NK200': ''
+            'CANO': self.CANO,
+            'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
+            'OVRS_EXCG_CD': KisStock.OVRS_EXCG_CD,
+            'TR_CRCY_CD': KisStock.TR_CRCY_CD,
+            'CTX_AREA_FK200': '',
+            'CTX_AREA_NK200': ''
         }
 
         # query the holdings
@@ -380,9 +380,9 @@ class GeckoStock(BaseStock):
             'vs_currencies': GeckoStock.BASE_CURRENCY
         }
         res = self._getWrapper(
-                                international_price_inquiry_url,
-                                GeckoStock.BASE_HEADER,
-                                international_price_inquiry_params
+            international_price_inquiry_url,
+            GeckoStock.BASE_HEADER,
+            international_price_inquiry_params
         )
 
         # extract prices from the queries
@@ -403,13 +403,13 @@ class GeckoStock(BaseStock):
             coin_symbs = self.stockgrp_info['stocks'].keys()
             domestic_price_inquiry_url = domestic_price_inquiry_url_head + f'{ROK_exchange_id}/tickers'
             domestic_price_inquiry_params = {
-                    'id': ROK_exchange_id,
-                    'coin_ids': ','.join([GeckoStock.SYMB2ID_DICT[coin_symb] for coin_symb in coin_symbs]),
+                'id': ROK_exchange_id,
+                'coin_ids': ','.join([GeckoStock.SYMB2ID_DICT[coin_symb] for coin_symb in coin_symbs]),
             }
             res = self._getWrapper(
-                                    domestic_price_inquiry_url,
-                                    GeckoStock.BASE_HEADER,
-                                    domestic_price_inquiry_params
+                domestic_price_inquiry_url,
+                GeckoStock.BASE_HEADER,
+                domestic_price_inquiry_params
             )
             ROK_tickers = res.json()['tickers']
             for ROK_ticker in ROK_tickers:
@@ -508,9 +508,9 @@ class KrxStock(BaseStock):
 
         # get a CSV containing the price from the response
         download_resp = self._postWrapper(
-                                            KrxStock.PRICE_CSV_DOWNLOAD_URL,
-                                            download_request_headers,
-                                            download_request_payload
+            KrxStock.PRICE_CSV_DOWNLOAD_URL,
+            download_request_headers,
+            download_request_payload
         )
         price_csv = StringIO(download_resp.content.decode(KrxStock.PRICE_CSV_ENCODING))
         price_csv_parsed = csv.DictReader(price_csv)
