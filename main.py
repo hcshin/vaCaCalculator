@@ -52,17 +52,17 @@ def main(
     logger = setup_logger('autoinvestment_logger', debug_level)
     logger.debug('Program started')
 
-    my_portfolio = portfolio.Portfolio(ref_report_path, saving_in_krw, saving_in_usd)
-
     if output_report_path is None:
         if not print_report:
             logger.error('--print-report flag must be given when not giving output_report_path')
             raise Exception
         else:
             logger.info('no output_report_path given, just printing given reference report.')
+            my_portfolio = portfolio.Portfolio(ref_report_path)
             my_portfolio.print_ref_report()
 
     else:
+        my_portfolio = portfolio.Portfolio(ref_report_path, saving_in_krw, saving_in_usd)
         my_portfolio.distribute_saving()
         my_portfolio.write_report_to_file(output_report_path)
 

@@ -15,34 +15,52 @@ class Portfolio:
     EXCHANGERATE_LOOKUP_URL = 'https://www.koreaexim.go.kr/site/program/financial/exchangeJSON'
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
 
-    def __init__(self, ref_report_fname: str, savingInKRW: float, savingInUSD: float = 0.0):
-        logger.debug('Portfolio constructor called')
+    def __init__(self, *args) -> None:
+        if (len(args) == 1 and isinstance(args[0], str)):  # simple constructor just for printing ref_report
+            logger.debug('Portfolio simple constructor called')
+            ref_report_fname = args[0]
 
-        # open and decrypt secrets
-        with open('secrets.json', 'r') as f_secret:
-            self.EXCHANGERATE_LOOKUP_AUTHKEY = json.load(f_secret)['ExchangerateSecrets']['AUTH_KEY']
+            with open(ref_report_fname, 'r') as f:
+                self.ref_report = json.load(f)
+        elif (
+               len(args) == 3 and
+               isinstance(args[0], str) and
+               isinstance(args[1], float) and
+               isinstance(args[2], float)
+        ):
+            logger.debug('Portfolio constructor called')
+            ref_report_fname = args[0]
+            savingInKRW = args[1]
+            savingInUSD = args[2]
 
-        # open and parse reference report file
-        with open(ref_report_fname, 'r') as f:
-            # first get the exchange rate to convert savingKRW to USD
-            self.exchange_rate = self._get_exchange_rate()
-            self.savingInKRW = savingInKRW
-            self.savingInUSD = savingInUSD
-            self.saving = savingInKRW / self.exchange_rate + savingInUSD
+            # open and decrypt secrets
+            with open('secrets.json', 'r') as f_secret:
+                self.EXCHANGERATE_LOOKUP_AUTHKEY = json.load(f_secret)['ExchangerateSecrets']['AUTH_KEY']
 
-            # refer to root_ref_report.json for report format
-            self.ref_report = json.load(f)
+            # open and parse reference report file
+            with open(ref_report_fname, 'r') as f:
+                # first get the exchange rate to convert savingKRW to USD
+                self.exchange_rate = self._get_exchange_rate()
+                self.savingInKRW = savingInKRW
+                self.savingInUSD = savingInUSD
+                self.saving = savingInKRW / self.exchange_rate + savingInUSD
 
-            # start verifying
-            # sum of all weights of all stocks should be equal to 1.0
-            stock_sum_of_weights = 0.0
-            for stockgroup in self.ref_report['stockgroups'].values():
-                for stock in stockgroup['stocks'].values():
-                    stock_sum_of_weights += stock['weight']
-            assert round(stock_sum_of_weights, 4) == 1.0
+                # refer to root_ref_report.json for report format
+                self.ref_report = json.load(f)
 
-            # instantiate this_report
-            self.this_report = {}
+                # start verifying
+                # sum of all weights of all stocks should be equal to 1.0
+                stock_sum_of_weights = 0.0
+                for stockgroup in self.ref_report['stockgroups'].values():
+                    for stock in stockgroup['stocks'].values():
+                        stock_sum_of_weights += stock['weight']
+                assert round(stock_sum_of_weights, 4) == 1.0
+
+                # instantiate this_report
+                self.this_report = {}
+        else:
+            logger.error('wrong form of Portfolio constructor called')
+            raise TypeError
 
     def _get_exchange_rate(self) -> float:
         querydate = datetime.today()
@@ -109,7 +127,7 @@ class Portfolio:
                 if 'price' in stock.keys():
                     priceUsd = stock['price']
                     if stock['currency'] == 'KRW':
-                        priceUsd /= self.exchange_rate
+                        priceUsd /= report_to_print['exchange_rate']  # use exchange rate in the report itself
 
                 table_data.append([
                     stockkey,
