@@ -14,9 +14,11 @@ logger = logging.getLogger('autoinvestment_logger')
 
 
 class BaseStock:
-    def __init__(self, exchange_rate: float, stockgrp_info: dict):
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, ref_stockgrp_info: dict):
         self.exchange_rate = exchange_rate
-        self.stockgrp_info = stockgrp_info
+        self.ref_exchange_rate = ref_exchange_rate
+        self.ref_stockgrp_info = ref_stockgrp_info
+        self.stockgrp_info = copy.deepcopy(ref_stockgrp_info)  # where new values will be stored
 
     def _postWrapper(self, URL, headers=None, data=None):
         logger.debug(f'POSTing headers {headers} and data {data} to {URL}.')
@@ -32,6 +34,24 @@ class BaseStock:
 
         return res
 
+    def _update_ca_invested(self):
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            if 'cumSumCaInvested' not in stock.keys():
+                logger.error(f'{stockkey} does not have cumSumCaInvested item. this must be given to update')
+                raise ValueError
+
+            # utilize ref_stockgrp_info to derive cumSumCaInvested for this report
+            ref_stock = self.ref_stockgrp_info['stocks'][stockkey]
+            if stock['currency'] == 'USD':
+                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + \
+                    ref_stock['price'] * (stock['holdings'] - ref_stock['holdings'])
+            elif stock['currency'] == 'KRW':
+                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + \
+                    (ref_stock['price'] / self.ref_exchange_rate) * (stock['holdings'] - ref_stock['holdings'])
+            else:
+                logger.error('Only KRW or USD are supported as currencies')
+                raise ValueError
+
     def _update_holdings(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
             if 'holdings' not in stock.keys():
@@ -41,7 +61,7 @@ class BaseStock:
             # take account of actually invested units. add them up into holdings
             if 'actualInvestedInUnits' in stock.keys():
                 stock['holdings'] += stock['actualInvestedInUnits']
-                del stock['actualInvestedInUnits']
+                del stock['actualInvestedInUnits']  # remove actualInvestedInUnits from this_report
 
     def _derive_appraisement(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
@@ -66,8 +86,9 @@ class BaseStock:
                 logger.error(f'Currently only KRW or USD are supported as currencies, but {stock["currency"]} given.')
 
     def update_all(self):  # call order is crucial
-        self._update_holdings()  # before _derive_appraisement
-        self._derive_appraisement()
+        self._update_holdings()
+        self._update_ca_invested()  # after _update_holdings
+        self._derive_appraisement()  # after _update_holdings
 
     def get_stockgrp(self) -> dict:
         return self.stockgrp_info
@@ -117,8 +138,8 @@ class KisStock(BaseStock):
     OVRS_EXCG_CD = 'NASD'  # NYS + NAS
     TR_CRCY_CD = 'USD'  # Currency for the trading
 
-    def __init__(self, exchange_rate: float, stockgrp_info: dict):
-        super().__init__(exchange_rate, stockgrp_info)
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, stockgrp_info: dict):
+        super().__init__(exchange_rate, ref_exchange_rate, stockgrp_info)
 
         with open('secrets.json', 'r') as f_secret:
             f_secret_loaded = json.load(f_secret)
@@ -348,6 +369,7 @@ class KisStock(BaseStock):
         self._issue_access_token()  # before _collect_prices, and _collect_holdings_and_invested
         self._collect_prices()  # before _discard_access_token
         self._collect_holdings()  # before _discard_access_token
+        self._update_ca_invested()  # after _collect_holdings
         self._derive_appraisement()  # after _collect_prices and _collect_holdings
         self._discard_access_token()
 
@@ -461,6 +483,7 @@ class GeckoStock(BaseStock):
         self._collect_international_prices()
         self._collect_domestic_prices()
         self._derive_kimchi_premium()  # after _collect_international_prices and _collect_domestic_prices
+        self._update_ca_invested()  # after _update_holdings
         self._derive_appraisement()
 
 
@@ -532,4 +555,5 @@ class KrxStock(BaseStock):
         self._update_holdings()  # before _derive_appraisement and prices collection
         self._collect_otp()  # before _collect_prices
         self._collect_prices()  # before _derive_appraisement
+        self._update_ca_invested()  # after _update_holdings
         self._derive_appraisement()

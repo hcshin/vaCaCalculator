@@ -2,7 +2,6 @@ import json
 import logging
 import requests
 import stockwrapper
-import copy
 from tabulate import tabulate
 from datetime import datetime, timedelta
 
@@ -16,12 +15,14 @@ class Portfolio:
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
 
     def __init__(self, *args) -> None:
-        if (len(args) == 1 and isinstance(args[0], str)):  # simple constructor just for printing ref_report
+        # constructor 1: simple constructor just for printing ref_report
+        if (len(args) == 1 and isinstance(args[0], str)):
             logger.debug('Portfolio simple constructor called')
             ref_report_fname = args[0]
 
             with open(ref_report_fname, 'r') as f:
                 self.ref_report = json.load(f)
+        # constructor 2: regular constructor for deriving new reports
         elif (
                len(args) == 3 and
                isinstance(args[0], str) and
@@ -239,6 +240,7 @@ class Portfolio:
                 else:
                     # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
                     # use appraisement as previous cumSumCaInvested
+                    # N.B. this route is only for the 1st report because reports afterward all have cumSumCaInvested
                     if 'cumSumCaInvestedInKRW' not in stock.keys() and 'cumSumCaInvestedInUSD' not in stock.keys():
                         stock['cumSumCaInvested'] = stock['appraisement'] + stock['need2investCA']
                     # in case either cumSumCaInvestedInKRW or cumSumCaInvestedInUSD exists, use them instead
@@ -295,25 +297,29 @@ class Portfolio:
             if stockgroupkey == 'KIS':
                 stockgroup_handler = stockwrapper.KisStock(
                     self.this_report['exchange_rate'],
-                    copy.deepcopy(stockgroup)
+                    self.ref_report['exchange_rate'],
+                    stockgroup
                 )
 
             elif stockgroupkey == 'CoinGecko':
                 stockgroup_handler = stockwrapper.GeckoStock(
                     self.this_report['exchange_rate'],
-                    copy.deepcopy(stockgroup)
+                    self.ref_report['exchange_rate'],
+                    stockgroup
                 )
 
             elif stockgroupkey == 'KRX':
                 stockgroup_handler = stockwrapper.KrxStock(
                     self.this_report['exchange_rate'],
-                    copy.deepcopy(stockgroup)
+                    self.ref_report['exchange_rate'],
+                    stockgroup
                 )
 
             else:
                 stockgroup_handler = stockwrapper.BaseStock(
                     self.this_report['exchange_rate'],
-                    copy.deepcopy(stockgroup)
+                    self.ref_report['exchange_rate'],
+                    stockgroup
                 )
 
             stockgroup_handler.update_all()
