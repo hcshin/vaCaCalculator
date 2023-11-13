@@ -51,6 +51,22 @@ $ python3 -m pip install -R pip-requirements
 }
 ```
 
+한국투자 API의 경우 정보조회 과정에서 24시간 동안 유효한 접속토큰이 발급되는데 본 프로그램을 1회 이상 호출 시 secrets.json에 아래와 같이 KisSecrets 항목에 접속토큰과 발급일시가 함께 기록됩니다. 이는 자동으로 입력되는 항목이며, 후추 본 프로그램을 호출 시 이전 호출 시간에서 24시간이 경과하지 않았다면 기록된 접속토큰을 재활용하여 한국투자 API를 이용하게 됩니다.
+
+```
+{
+	"ExchangerateSecrets": {
+		"AUTH_KEY": "한국수출입은행_현재환율API_인증키"
+	},
+	"KisSecrets": {
+		"APP_KEY": "한국투자증권_OpenAPI_APP_KEY",
+		"APP_SECRET": "한국투자증권_OpenAPI_APP_SECRET"
+        "ACCESS_TOKEN": "한국투자증권_OpenAPI_ACCESS_TOKEN",
+        "ACCESS_TOKEN_TIME": "한국투자증권_OpenAPI_ACCESS_TOKEN_TIME"
+	}
+}
+```
+
 한국투자 API를 사용하지 않는 경우 아래와 같이 "KisSecrets" 항목을 제외하고 "ExchangerateSecrets" 항목만으로 json을 구성합니다.
 
 ```
