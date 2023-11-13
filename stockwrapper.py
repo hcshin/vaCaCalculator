@@ -146,14 +146,34 @@ class KisStock(BaseStock):
             self.APP_KEY = f_secret_loaded['KisSecrets']['APP_KEY']
             self.APP_SECRET = f_secret_loaded['KisSecrets']['APP_SECRET']
 
+            # check if access_token is already in f_secret
+            KisSecrets = f_secret_loaded['KisSecrets']
+            if 'ACCESS_TOKEN' in KisSecrets.keys() and 'ACCESS_TOKEN_TIME' in KisSecrets.keys():
+                timediff = datetime.today() - datetime.strptime(KisSecrets['ACCESS_TOKEN_TIME'], '%Y-%m-%d %H:%M:%S')
+                # access token expires after 24H
+                if timediff.days > 0:
+                    self.access_token = None
+                else:
+                    self.access_token = KisSecrets['ACCESS_TOKEN']
+            else:
+                self.access_token = None
+
+        # if there's no valid token, re-issue it
+        if self.access_token is None:
+            self._issue_access_token()
+            # dump newly issued token to secrets.json
+            f_secret_loaded['KisSecrets']['ACCESS_TOKEN'] = self.access_token
+            f_secret_loaded['KisSecrets']['ACCESS_TOKEN_TIME'] = self.access_token_time
+            with open('secrets.json', 'w') as f_secret:
+                json.dump(f_secret_loaded, f_secret, indent=4)
+
+    def _issue_access_token(self):
         self.BASE_BODY = {
             'grant_type': 'client_credentials',
             'appkey': self.APP_KEY,
             'appsecret': self.APP_SECRET
         }
-        self.access_token = None
 
-    def _issue_access_token(self):
         access_token_issue_headers = copy.deepcopy(KisStock.BASE_HEADER)
         access_token_issue_body = json.dumps(copy.deepcopy(self.BASE_BODY))
         access_token_issue_path = 'oauth2/tokenP'
@@ -164,22 +184,7 @@ class KisStock(BaseStock):
             access_token_issue_body
         )
         self.access_token = access_token_issue_res.json()['access_token']
-
-    def _discard_access_token(self):
-        if self.access_token is None:
-            return  # access_token has never been issued or already discarded
-
-        access_token_discard_headers = copy.deepcopy(KisStock.BASE_HEADER)
-        access_token_discard_body = copy.deepcopy(self.BASE_BODY)
-        access_token_discard_body['token'] = self.access_token
-        access_token_discard_path = 'oauth2/revokeP'
-        access_token_discard_url = f'{KisStock.URL_BASE}/{access_token_discard_path}'
-        self._postWrapper(
-            access_token_discard_url,
-            access_token_discard_headers,
-            access_token_discard_body
-        )
-        self.access_token = None
+        self.access_token_time = datetime.strftime(datetime.today(), '%Y-%m-%d %H:%M:%S')
 
     def _collect_prices(self):
         # domestic
@@ -366,12 +371,10 @@ class KisStock(BaseStock):
                 raise ValueError
 
     def update_all(self):  # call order is crucial
-        self._issue_access_token()  # before _collect_prices, and _collect_holdings_and_invested
-        self._collect_prices()  # before _discard_access_token
-        self._collect_holdings()  # before _discard_access_token
+        self._collect_prices()
+        self._collect_holdings()
         self._update_ca_invested()  # after _collect_holdings
         self._derive_appraisement()  # after _collect_prices and _collect_holdings
-        self._discard_access_token()
 
 
 class GeckoStock(BaseStock):
@@ -436,10 +439,8 @@ class GeckoStock(BaseStock):
             ROK_tickers = res.json()['tickers']
             for ROK_ticker in ROK_tickers:
                 if ROK_ticker['base'] not in coin_symbs:
-                    error_msg = f'Queired cryptocurrency ({ROK_ticker["base"]}) does not match any of '
-                    f'target cryptocurrencies ({coin_symbs})'
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                    # ignore coins not in coin_symbs
+                    continue
 
                 if ROK_ticker['target'] != 'KRW':
                     # ignore exchange pairs that does not have KRW as the target currency
@@ -452,6 +453,12 @@ class GeckoStock(BaseStock):
                 else:
                     # when there is no such a key, add a list as a value
                     ROK_prices[ROK_ticker['base']] = [ROK_price]
+
+        # check if at least one price is collected for each target coin
+        if len(ROK_prices) != len(coin_symbs):
+            logger.error('Domestic price of at least one coin is not collected.\n'
+                         f'Collected coins list: {ROK_prices.keys()}\n'
+                         f'Target coins list: {coin_symbs}\n')
 
         # for each cryptocurrency, take the median as the price to be registered to stockgrp_info
         # and apply exchange rate so that the ROK price is in GeckoStock.BASE_CURRENCY
