@@ -41,16 +41,10 @@ class BaseStock:
                 raise ValueError
 
             # utilize ref_stockgrp_info to derive cumSumCaInvested for this report
+            # N.B. need2investCA has nothing to do with actual invested amount of each stock it's just an ideal guideline for deriving VA amount
+            #       Even if we didn't followed the guideline its trajectory remains unaltered (so that we can eventually persue the ideal goal)
             ref_stock = self.ref_stockgrp_info['stocks'][stockkey]
-            if stock['currency'] == 'USD':
-                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + \
-                    ref_stock['price'] * (stock['holdings'] - ref_stock['holdings'])
-            elif stock['currency'] == 'KRW':
-                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + \
-                    (ref_stock['price'] / self.ref_exchange_rate) * (stock['holdings'] - ref_stock['holdings'])
-            else:
-                logger.error('Only KRW or USD are supported as currencies')
-                raise ValueError
+            stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + ref_stock['need2investCA']
 
     def _update_holdings(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
