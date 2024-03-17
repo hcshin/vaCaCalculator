@@ -132,34 +132,41 @@ class KisStock(BaseStock):
     OVRS_EXCG_CD = 'NASD'  # NYS + NAS
     TR_CRCY_CD = 'USD'  # Currency for the trading
 
-    def __init__(self, exchange_rate: float, ref_exchange_rate: float, stockgrp_info: dict):
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, secrets_fname: str, tokens_fname: str, stockgrp_info: dict):
         super().__init__(exchange_rate, ref_exchange_rate, stockgrp_info)
 
-        with open('secrets.json', 'r') as f_secret:
+        with open(secrets_fname, 'r') as f_secret:
             f_secret_loaded = json.load(f_secret)
             self.APP_KEY = f_secret_loaded['KisSecrets']['APP_KEY']
             self.APP_SECRET = f_secret_loaded['KisSecrets']['APP_SECRET']
 
-            # check if access_token is already in f_secret
-            KisSecrets = f_secret_loaded['KisSecrets']
-            if 'ACCESS_TOKEN' in KisSecrets.keys() and 'ACCESS_TOKEN_TIME' in KisSecrets.keys():
-                timediff = datetime.today() - datetime.strptime(KisSecrets['ACCESS_TOKEN_TIME'], '%Y-%m-%d %H:%M:%S')
-                # access token expires after 24H
-                if timediff.days > 0:
-                    self.access_token = None
+        try:
+            with open(tokens_fname, 'r') as f_token:
+                f_token_loaded = json.load(f_token)
+                # check if access_token is already in f_token
+                KisTokens = f_token_loaded['KisTokens']
+                if 'ACCESS_TOKEN' in KisTokens.keys() and 'ACCESS_TOKEN_TIME' in KisTokens.keys():
+                    timediff = datetime.today() - datetime.strptime(KisTokens['ACCESS_TOKEN_TIME'], '%Y-%m-%d %H:%M:%S')
+                    # access token expires after 24H
+                    if timediff.days > 0:
+                        self.access_token = None
+                    else:
+                        self.access_token = KisTokens['ACCESS_TOKEN']
                 else:
-                    self.access_token = KisSecrets['ACCESS_TOKEN']
-            else:
-                self.access_token = None
+                    self.access_token = None
+        except FileNotFoundError:
+            self.access_token = None
 
         # if there's no valid token, re-issue it
         if self.access_token is None:
+            f_token_loaded = {}
+            f_token_loaded['KisTokens'] = {}
             self._issue_access_token()
             # dump newly issued token to secrets.json
-            f_secret_loaded['KisSecrets']['ACCESS_TOKEN'] = self.access_token
-            f_secret_loaded['KisSecrets']['ACCESS_TOKEN_TIME'] = self.access_token_time
-            with open('secrets.json', 'w') as f_secret:
-                json.dump(f_secret_loaded, f_secret, indent=4)
+            f_token_loaded['KisTokens']['ACCESS_TOKEN'] = self.access_token
+            f_token_loaded['KisTokens']['ACCESS_TOKEN_TIME'] = self.access_token_time
+            with open(tokens_fname, 'w') as f_token:
+                json.dump(f_token_loaded, f_token, indent=4)
 
     def _issue_access_token(self):
         self.BASE_BODY = {
@@ -476,7 +483,7 @@ class GeckoStock(BaseStock):
             if coin_value['kimchi'] > 1.05:
                 logger.warning(
                     f'Kimchi premium for {coin_symb} is larger than 5% ({coin_value["kimchi"]}). '
-                    'Consider using forein exchanges'
+                    'Consider using foreign exchanges'
                 )
 
     def update_all(self):  # call order is crucial

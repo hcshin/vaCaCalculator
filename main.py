@@ -30,10 +30,24 @@ from setup_logger import setup_logger
     is_flag=True,
     help='whether to print investment report(s)'
 )
+@click.option(
+    '--secrets-path',
+    type=click.Path(exists=True, dir_okay=False),
+    default='secrets.json',
+    show_default=True,
+    help='path to the secrets JSON file'
+)
+@click.option(
+    '--tokens-path',
+    type=click.Path(exists=False, dir_okay=False),
+    default='tokens.json',
+    show_default=True,
+    help='path to the tokens JSON file'
+)
 @click.argument(
     'ref_report_path',
     type=click.Path(exists=True, dir_okay=False),
-    nargs=1,
+    nargs=1
 )
 @click.argument(
     'output_report_path',
@@ -46,6 +60,8 @@ def main(
     saving_in_krw,
     saving_in_usd,
     print_report,
+    secrets_path,
+    tokens_path,
     ref_report_path,
     output_report_path
 ):
@@ -62,7 +78,11 @@ def main(
             my_portfolio.print_ref_report()
 
     else:
-        my_portfolio = portfolio.Portfolio(ref_report_path, saving_in_krw, saving_in_usd)
+        my_portfolio = portfolio.Portfolio(ref_report_path,
+                                           secrets_path,
+                                           tokens_path,
+                                           saving_in_krw,
+                                           saving_in_usd)
         my_portfolio.distribute_saving()
         my_portfolio.write_report_to_file(output_report_path)
 

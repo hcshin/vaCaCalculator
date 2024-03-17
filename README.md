@@ -28,7 +28,7 @@ $ python3 -m pip install -R pip-requirements
 ```
 
 ### Secret 설정
-소스코드 파일에 token, API key 등 비밀정보 노출 방지를 위해 모든 비밀정보는 별도 파일인 secrets.json 파일에 별도 보관하도록 설정돼 있습니다. 해당 파일은 본 GitHub 저장소에 포함돼 있지 않으므로 파일을 별도로 생성해 주어야 하며 파일의 이름은 반드시 "secrets.json" 이어야 합니다. 현재 기준으로 비밀정보를 필요로 하는 서비스는 아래와 같습니다. 회원가입 및 서비스 신청 후 발급받은 비밀정보를 secrets.json에 후술되는 형식으로 저장합니다.
+소스코드 파일에 token, API key 등 비밀정보 노출 방지를 위해 모든 비밀정보는 별도 json 파일에 별도 보관하도록 설정돼 있습니다. 해당 파일은 본 GitHub 저장소에 포함돼 있지 않으므로 파일을 별도로 생성해 주어야 하며 파일의 이름은 기본적으로는 "secrets.json" 이지만, `--secrets-path` 인수를 통해 다른 이름을 가진 파일로도 지정 가능합니다. 현재 기준으로 비밀정보를 필요로 하는 서비스는 아래와 같습니다. 회원가입 및 서비스 신청 후 발급받은 비밀정보를 json 파일에 후술되는 형식으로 저장합니다.
 
 #### 환율 조회
 한국수출입은행 Open API를 이용합니다. https://www.koreaexim.go.kr/ir/HPHKIR019M01 의 현재환율 API를 참조하여 현재환율 조회를 위한 인증키를 발급받으십시오.
@@ -36,7 +36,7 @@ $ python3 -m pip install -R pip-requirements
 #### 한국투자 Open API - 선택
 국내 및 해외주식 가격 및 보유잔고 조회를 위해 필요합니다. 만약 한국투자증권을 사용하지 않으시거나 국내/해외 주식을 포트폴리오에 포함하지 않는 경우 필요치 않습니다. 신청을 위해서는 KIS Developers(https://apiportal.koreainvestment.com/intro#)의 API신청으로 이동하여 한국투자 회원가입 후 APP key와 secret을 발급받으십시오.
 
-#### secrets.json 파일 형식
+#### json 파일 형식
 발급된 비밀정보를 아래의 형식으로 입력합니다.
 
 ```
@@ -51,28 +51,24 @@ $ python3 -m pip install -R pip-requirements
 }
 ```
 
-한국투자 API의 경우 정보조회 과정에서 24시간 동안 유효한 접속토큰이 발급되는데 본 프로그램을 1회 이상 호출 시 secrets.json에 아래와 같이 KisSecrets 항목에 접속토큰과 발급일시가 함께 기록됩니다. 이는 자동으로 입력되는 항목이며, 후추 본 프로그램을 호출 시 이전 호출 시간에서 24시간이 경과하지 않았다면 기록된 접속토큰을 재활용하여 한국투자 API를 이용하게 됩니다.
-
-```
-{
-	"ExchangerateSecrets": {
-		"AUTH_KEY": "한국수출입은행_현재환율API_인증키"
-	},
-	"KisSecrets": {
-		"APP_KEY": "한국투자증권_OpenAPI_APP_KEY",
-		"APP_SECRET": "한국투자증권_OpenAPI_APP_SECRET"
-        "ACCESS_TOKEN": "한국투자증권_OpenAPI_ACCESS_TOKEN",
-        "ACCESS_TOKEN_TIME": "한국투자증권_OpenAPI_ACCESS_TOKEN_TIME"
-	}
-}
-```
-
 한국투자 API를 사용하지 않는 경우 아래와 같이 "KisSecrets" 항목을 제외하고 "ExchangerateSecrets" 항목만으로 json을 구성합니다.
 
 ```
 {
 	"ExchangerateSecrets": {
 		"AUTH_KEY": "한국수출입은행_현재환율API_인증키"
+	}
+}
+```
+
+### Tokens 설정
+한국투자 API의 경우 정보조회 과정에서 24시간 동안 유효한 접속토큰이 발급되는데 본 프로그램을 1회 이상 호출 시 기본적으로 "tokens.json"에 아래와 같이 KisTokens 항목에 접속토큰과 발급일시가 함께 기록됩니다. 이는 자동으로 입력되는 항목이며, 후추 본 프로그램을 호출 시 이전 호출 시간에서 24시간이 경과하지 않았다면 기록된 접속토큰을 재활용하여 한국투자 API를 이용하게 됩니다. Secrets의 경우와 유사하게 `--tokens-path` 인수를 통해 "tokens.json" 이외의 json 파일명도 사용 가능하며 만약 해당 파일명이 main.py 와 동일 디렉토리에 존재하지 않는다면 주어진 파일명으로 json 파일이 생성되고 아래의 내용이 기록됩니다.
+
+```
+{
+	"KisTokens": {
+        "ACCESS_TOKEN": "한국투자증권_OpenAPI_ACCESS_TOKEN",
+        "ACCESS_TOKEN_TIME": "한국투자증권_OpenAPI_ACCESS_TOKEN_TIME"
 	}
 }
 ```
@@ -380,4 +376,13 @@ Total Appraisement: 11897.74
 | KRW    |   0.00   |  1000000   |    755.63    |      755.63      |    0.00     |         0          |     0.1      |    0.06    |       0.00        |
 | USD    |    1     |    1000    |   1000.00    |     1000.00      |    0.00     |         0          |     0.1      |    0.08    |       0.00        |
 +--------+----------+------------+--------------+------------------+-------------+--------------------+--------------+------------+-------------------+
+```
+
+## 다수KisStock 계좌의 운영
+KisStock의 경우 계좌별로 APP_KEY, APP_SECRET, ACCESS_TOKEN을 모두 별도로 가져가기 때문에 하나의 secrets json 및 tokens json 파일로는 대응이 불가능합니다. 또한 하나의 투자보고서 파일에는 하나의 KisStock 계좌번호만 기재될 수 있습니다. 따라서 다수의 KisStock 계좌를 운영하는 경우 각각의 계좌별로 별도의 secrets & tokens json 파일을 지정하고 투자보고서 json 파일 또한 별도로 생성하십시오.
+
+예를 들어 계좌 A, B가 있는 경우
+```
+(venv) python3 main.py --saving-in-krw=1000000 --secrets-path=secrets_A.json --tokens-path=tokens_A.json A2402.json A2403.json # A계좌용 투자보고서 A2402.json을 이용하여 A2403.json을 생성. secrets와 tokens는 A 계좌용인 secrets_A.json 및 tokens_A.json을 이용.
+(venv) python3 main.py --saving-in-krw=1000000 --secrets-path=secrets_B.json --tokens-path=tokens_B.json B2402.json B2403.json # B계좌용 투자보고서 B2402.json을 이용하여 B2403.json을 생성. secrets와 tokens는 B 계좌용인 secrets_B.json 및 tokens_B.json을 이용.
 ```

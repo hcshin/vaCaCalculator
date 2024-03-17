@@ -24,18 +24,22 @@ class Portfolio:
                 self.ref_report = json.load(f)
         # constructor 2: regular constructor for deriving new reports
         elif (
-               len(args) == 3 and
+               len(args) == 5 and
                isinstance(args[0], str) and
-               isinstance(args[1], float) and
-               isinstance(args[2], float)
+               isinstance(args[1], str) and
+               isinstance(args[2], str) and
+               isinstance(args[3], float) and
+               isinstance(args[4], float)
         ):
             logger.debug('Portfolio constructor called')
             ref_report_fname = args[0]
-            savingInKRW = args[1]
-            savingInUSD = args[2]
+            self.secrets_fname = args[1]
+            self.tokens_fname = args[2]
+            savingInKRW = args[3]
+            savingInUSD = args[4]
 
             # open and decrypt secrets
-            with open('secrets.json', 'r') as f_secret:
+            with open(self.secrets_fname, 'r') as f_secret:
                 self.EXCHANGERATE_LOOKUP_AUTHKEY = json.load(f_secret)['ExchangerateSecrets']['AUTH_KEY']
 
             # open and parse reference report file
@@ -298,6 +302,8 @@ class Portfolio:
                 stockgroup_handler = stockwrapper.KisStock(
                     self.this_report['exchange_rate'],
                     self.ref_report['exchange_rate'],
+                    self.secrets_fname,
+                    self.tokens_fname,
                     stockgroup
                 )
 
