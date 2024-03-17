@@ -100,6 +100,7 @@ class KisStock(BaseStock):
     DOM_PRICE_INQUIRY_PATH = 'uapi/domestic-stock/v1/quotations/inquire-price'
     US_PRICE_INQUIRY_PATH = 'uapi/overseas-price/v1/quotations/price'
     DOM_HOLDINGS_INQUIRY_PATH = 'uapi/domestic-stock/v1/trading/inquire-balance'
+    DOM_PENSION_HOLDINGS_INQUIRY_PATH = 'uapi/domestic-stock/v1/trading/pension/inquire-balance'
     US_HOLDINGS_INQUIRY_PATH = 'uapi/overseas-stock/v1/trading/inquire-balance'
 
     # - TR_ID (service identifiers)
@@ -108,6 +109,7 @@ class KisStock(BaseStock):
     TR_ID_CURR_DOM_HOLDINGS_REAL = 'TTTC8434R'
     TR_ID_CURR_DOM_HOLDINGS_TEST = 'VTTC8434R'
     TR_ID_CURR_DOM_HOLDINGS = TR_ID_CURR_DOM_HOLDINGS_REAL
+    TR_ID_CURR_DOM_HOLDINGS_PENSION = 'TTTC2208R'
     TR_ID_CURR_US_HOLDINGS_REAL = 'TTTS3012R'
     TR_ID_CURR_US_HOLDINGS_TEST = 'VTTS3012R'
 
@@ -127,6 +129,9 @@ class KisStock(BaseStock):
     FUND_STTL_ICLD_YN = 'N'
     FNCG_AMT_AUTO_RDPT_YN = 'N'
     PRCS_DVSN = '00'
+    # = DOM PENSION
+    INQR_DVSN_PENSION = '00'
+    ACCA_DVSN_CD = '00'
 
     # = US
     OVRS_EXCG_CD = 'NASD'  # NYS + NAS
@@ -263,26 +268,44 @@ class KisStock(BaseStock):
         # because this is different from cumSumCaInvested which represents cum sum of invested amount determined by CA
         # In contrast what KIS API offers is the result of VA, which practically mixes up CA as well)
 
-        # domestic
-        dom_holdings_inquiry_url = f'{KisStock.URL_BASE}/{KisStock.DOM_HOLDINGS_INQUIRY_PATH}'
-        dom_holdings_inquiry_headers = copy.deepcopy(KisStock.BASE_HEADER)
-        dom_holdings_inquiry_headers['authorization'] = f'Bearer {self.access_token}'
-        dom_holdings_inquiry_headers['appkey'] = self.APP_KEY
-        dom_holdings_inquiry_headers['appsecret'] = self.APP_SECRET
-        dom_holdings_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_DOM_HOLDINGS
-        dom_holdings_inquiry_params = {
-            'CANO': self.CANO,
-            'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
-            'AFHR_FLPR_YN': KisStock.AFHR_FLPR_YN,
-            'OFL_YN': KisStock.OFL_YN,
-            'INQR_DVSN': KisStock.INQR_DVSN,
-            'UNPR_DVSN': KisStock.UNPR_DVSN,
-            'FUND_STTL_ICLD_YN': KisStock.FUND_STTL_ICLD_YN,
-            'FNCG_AMT_AUTO_RDPT_YN': KisStock.FNCG_AMT_AUTO_RDPT_YN,
-            'PRCS_DVSN': KisStock.PRCS_DVSN,
-            'CTX_AREA_FK100': '',
-            'CTX_AREA_NK100': ''
-        }
+        if self.ACNT_PRDT_CD == '29':
+            # pension (domestic only)
+            dom_holdings_inquiry_url = f'{KisStock.URL_BASE}/{KisStock.DOM_PENSION_HOLDINGS_INQUIRY_PATH}'
+            dom_holdings_inquiry_headers = copy.deepcopy(KisStock.BASE_HEADER)
+            dom_holdings_inquiry_headers['authorization'] = f'Bearer {self.access_token}'
+            dom_holdings_inquiry_headers['appkey'] = self.APP_KEY
+            dom_holdings_inquiry_headers['appsecret'] = self.APP_SECRET
+            dom_holdings_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_DOM_HOLDINGS_PENSION
+            dom_holdings_inquiry_headers['custtype'] = 'P'  # Individual Customer
+            dom_holdings_inquiry_params = {
+                'CANO': self.CANO,
+                'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
+                'ACCA_DVSN_CD': KisStock.ACCA_DVSN_CD,
+                'INQR_DVSN': KisStock.INQR_DVSN_PENSION,
+                'CTX_AREA_FK100': '',
+                'CTX_AREA_NK100': ''
+            }
+        else:
+            # domestic
+            dom_holdings_inquiry_url = f'{KisStock.URL_BASE}/{KisStock.DOM_HOLDINGS_INQUIRY_PATH}'
+            dom_holdings_inquiry_headers = copy.deepcopy(KisStock.BASE_HEADER)
+            dom_holdings_inquiry_headers['authorization'] = f'Bearer {self.access_token}'
+            dom_holdings_inquiry_headers['appkey'] = self.APP_KEY
+            dom_holdings_inquiry_headers['appsecret'] = self.APP_SECRET
+            dom_holdings_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_DOM_HOLDINGS
+            dom_holdings_inquiry_params = {
+                'CANO': self.CANO,
+                'ACNT_PRDT_CD': self.ACNT_PRDT_CD,
+                'AFHR_FLPR_YN': KisStock.AFHR_FLPR_YN,
+                'OFL_YN': KisStock.OFL_YN,
+                'INQR_DVSN': KisStock.INQR_DVSN,
+                'UNPR_DVSN': KisStock.UNPR_DVSN,
+                'FUND_STTL_ICLD_YN': KisStock.FUND_STTL_ICLD_YN,
+                'FNCG_AMT_AUTO_RDPT_YN': KisStock.FNCG_AMT_AUTO_RDPT_YN,
+                'PRCS_DVSN': KisStock.PRCS_DVSN,
+                'CTX_AREA_FK100': '',
+                'CTX_AREA_NK100': ''
+            }
 
         # query the holdings
         is_all = False
@@ -374,6 +397,7 @@ class KisStock(BaseStock):
     def update_all(self):  # call order is crucial
         self._collect_prices()
         self._collect_holdings()
+        import pdb; pdb.set_trace()
         self._update_ca_invested()  # after _collect_holdings
         self._derive_appraisement()  # after _collect_prices and _collect_holdings
 
