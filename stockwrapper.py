@@ -397,7 +397,6 @@ class KisStock(BaseStock):
     def update_all(self):  # call order is crucial
         self._collect_prices()
         self._collect_holdings()
-        import pdb; pdb.set_trace()
         self._update_ca_invested()  # after _collect_holdings
         self._derive_appraisement()  # after _collect_prices and _collect_holdings
 
