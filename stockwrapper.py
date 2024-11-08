@@ -20,9 +20,9 @@ class BaseStock:
         self.ref_stockgrp_info = ref_stockgrp_info
         self.stockgrp_info = copy.deepcopy(ref_stockgrp_info)  # where new values will be stored
 
-    def _postWrapper(self, URL, headers=None, data=None):
+    def _postWrapper(self, URL, headers=None, data=None, verify=True):
         logger.debug(f'POSTing headers {headers} and data {data} to {URL}.')
-        res = requests.post(URL, headers=headers, data=data)
+        res = requests.post(URL, headers=headers, data=data, verify=verify)
         logger.debug(f'Got POST response: {res.text}')
 
         return res
@@ -520,6 +520,11 @@ class GeckoStock(BaseStock):
 
 class KrxStock(BaseStock):
     OTP_GENERATE_URL = 'http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd'
+    OTP_GENERATE_HEADERS = {
+        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
+                       'AppleWebKit/537.36 (KHTML, like Gecko)'
+                       'Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0')
+    }
     OTP_GENERATE_PAYLOAD_BASE = {
         'locale': 'en_US',
         'isuCd': 'KRD040200002',
@@ -530,6 +535,7 @@ class KrxStock(BaseStock):
         'url': 'dbms/MDC/STAT/standard/MDCSTAT15001'
     }
     PRICE_CSV_DOWNLOAD_URL = 'http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd'
+    PRICE_CSV_DOWNLOAD_HEADERS = OTP_GENERATE_HEADERS
     PRICE_CSV_ENCODING = 'euc-kr'
     TRADING_DAY_LOOKUP_WINDOW_IN_DAYS = 10
 
@@ -552,19 +558,22 @@ class KrxStock(BaseStock):
         otp_requeust_payload['endDd'] = recent_trading_days[-1].strftime('%Y%m%d')
 
         # get OTP from the response
-        otp_resp = self._postWrapper(KrxStock.OTP_GENERATE_URL, None, otp_requeust_payload)
+        otp_resp = self._postWrapper(KrxStock.OTP_GENERATE_URL,
+                                     headers=KrxStock.OTP_GENERATE_HEADERS,
+                                     data=otp_requeust_payload)
         self.otp = otp_resp.text.strip()
 
     def _collect_prices(self):
         # complete request for download.cmd
-        download_request_headers = {'referer': KrxStock.OTP_GENERATE_URL}
+        download_request_headers = copy.deepcopy(KrxStock.PRICE_CSV_DOWNLOAD_HEADERS)
+        download_request_headers['referer'] = KrxStock.OTP_GENERATE_URL
         download_request_payload = {'code': self.otp}
 
         # get a CSV containing the price from the response
         download_resp = self._postWrapper(
             KrxStock.PRICE_CSV_DOWNLOAD_URL,
-            download_request_headers,
-            download_request_payload
+            headers=download_request_headers,
+            data=download_request_payload
         )
         price_csv = StringIO(download_resp.content.decode(KrxStock.PRICE_CSV_ENCODING))
         price_csv_parsed = csv.DictReader(price_csv)
