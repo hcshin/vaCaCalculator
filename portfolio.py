@@ -1,6 +1,7 @@
 import json
 import logging
 import requests
+import certifi
 import stockwrapper
 from tabulate import tabulate
 from datetime import datetime, timedelta
@@ -71,12 +72,24 @@ class Portfolio:
         querydate = datetime.today()
         empty_response = True
         while empty_response:
-            resp = requests.get(
-                Portfolio.EXCHANGERATE_LOOKUP_URL,
-                params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
-                        'searchdate': querydate.strftime('%Y%m%d'),
-                        'data': Portfolio.EXCHANGERATE_LOOKUP_DATA}
-            )
+            try:
+                resp = requests.get(
+                    Portfolio.EXCHANGERATE_LOOKUP_URL,
+                    params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
+                            'searchdate': querydate.strftime('%Y%m%d'),
+                            'data': Portfolio.EXCHANGERATE_LOOKUP_DATA},
+                    verify=certifi.where()
+                )
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f'Exception occurred while getting exchange rate: {e}')
+                logger.error('tentatively not verifying the cerificate')
+                resp = requests.get(
+                    Portfolio.EXCHANGERATE_LOOKUP_URL,
+                    params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
+                            'searchdate': querydate.strftime('%Y%m%d'),
+                            'data': Portfolio.EXCHANGERATE_LOOKUP_DATA},
+                    verify=False
+                )
 
             # between 00:00--11:00 each day the API returns an empty list
             # in that case we should query the rate
@@ -136,10 +149,11 @@ class Portfolio:
 
                 table_data.append([
                     stockkey,
+                    priceUsd  # if no priceUsd print it as is
+                    if priceUsd == 'N/A' else
                     f'{priceUsd:.4f}'  # if stockkey is KRW print up to 4th digit below decimal point
-                    if stockkey == 'KRW' else
-                    f'{priceUsd:.2f}'  # if priceUsd is a float print up to 2nd digit below decimal point
-                    if isinstance(priceUsd, float) else priceUsd,
+                    if isinstance(priceUsd, float) and stock['currency'] == 'KRW' else
+                    f'{priceUsd:.2f}',  # else up to 2nd digit below decimal point
                     stock['holdings']
                     if 'holdings' in stock.keys() else 'N/A',
                     f'{stock["appraisement"]:.2f}'
@@ -152,8 +166,7 @@ class Portfolio:
                     if 'need2investInUnits' in stock.keys() else 'N/A',
                     stock['weight'],
                     f'{stock["appraisement"] / report_to_print["total_appraisement"]:.2f}'
-                    if 'appraisement' in stock.keys() and 'total_appraisement' in report_to_print.keys()
-                    else 'N/A',
+                    if report_to_print["total_appraisement"] != 0 else '0',
                     f'{stock["cum_inv_deviation"]:.2f}'
                     if 'cum_inv_deviation' in stock.keys() else 'N/A',
                 ])

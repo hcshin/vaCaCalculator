@@ -27,9 +27,9 @@ class BaseStock:
 
         return res
 
-    def _getWrapper(self, URL, headers=None, params=None):
+    def _getWrapper(self, URL, headers=None, params=None, verify=True):
         logger.debug(f'GETing headers {headers} and params {params} to {URL}.')
-        res = requests.get(URL, headers=headers, params=params)
+        res = requests.get(URL, headers=headers, params=params, verify=verify)
         logger.debug(f'Got GET response: {res.text}')
 
         return res
