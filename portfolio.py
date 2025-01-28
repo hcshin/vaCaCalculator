@@ -1,7 +1,6 @@
 import json
 import logging
 import requests
-import certifi
 import stockwrapper
 from tabulate import tabulate
 from datetime import datetime, timedelta
@@ -14,6 +13,7 @@ class Portfolio:
     BASE_CURRENCY = 'USD'
     EXCHANGERATE_LOOKUP_URL = 'https://www.koreaexim.go.kr/site/program/financial/exchangeJSON'
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
+    EXCHANGERATE_CERT_PATH = 'koreaexim.pem'
 
     def __init__(self, *args) -> None:
         # constructor 1: simple constructor just for printing ref_report
@@ -72,24 +72,13 @@ class Portfolio:
         querydate = datetime.today()
         empty_response = True
         while empty_response:
-            try:
-                resp = requests.get(
-                    Portfolio.EXCHANGERATE_LOOKUP_URL,
-                    params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
-                            'searchdate': querydate.strftime('%Y%m%d'),
-                            'data': Portfolio.EXCHANGERATE_LOOKUP_DATA},
-                    verify=certifi.where()
-                )
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f'Exception occurred while getting exchange rate: {e}')
-                logger.error('tentatively not verifying the cerificate')
-                resp = requests.get(
-                    Portfolio.EXCHANGERATE_LOOKUP_URL,
-                    params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
-                            'searchdate': querydate.strftime('%Y%m%d'),
-                            'data': Portfolio.EXCHANGERATE_LOOKUP_DATA},
-                    verify=False
-                )
+            resp = requests.get(
+                Portfolio.EXCHANGERATE_LOOKUP_URL,
+                params={'authkey': self.EXCHANGERATE_LOOKUP_AUTHKEY,
+                        'searchdate': querydate.strftime('%Y%m%d'),
+                        'data': Portfolio.EXCHANGERATE_LOOKUP_DATA},
+                verify=Portfolio.EXCHANGERATE_CERT_PATH
+            )
 
             # between 00:00--11:00 each day the API returns an empty list
             # in that case we should query the rate
