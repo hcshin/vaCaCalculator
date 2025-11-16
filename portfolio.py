@@ -11,7 +11,7 @@ logger = logging.getLogger('autoinvestment_logger')
 
 class Portfolio:
     BASE_CURRENCY = 'USD'
-    EXCHANGERATE_LOOKUP_URL = 'https://www.koreaexim.go.kr/site/program/financial/exchangeJSON'
+    EXCHANGERATE_LOOKUP_URL = 'https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON'
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
     EXCHANGERATE_CERT_PATH = 'koreaexim.pem'
 
