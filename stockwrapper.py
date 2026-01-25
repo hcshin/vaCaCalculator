@@ -36,15 +36,27 @@ class BaseStock:
 
     def _update_ca_invested(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
-            if 'cumSumCaInvested' not in stock.keys():
-                logger.error(f'{stockkey} does not have cumSumCaInvested item. this must be given to update')
-                raise ValueError
-
             # utilize ref_stockgrp_info to derive cumSumCaInvested for this report
             # N.B. need2investCA has nothing to do with actual invested amount of each stock it's just an ideal guideline for deriving VA amount
             #       Even if we didn't followed the guideline its trajectory remains unaltered (so that we can eventually persue the ideal goal)
             ref_stock = self.ref_stockgrp_info['stocks'][stockkey]
-            stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + ref_stock['need2investCA']
+            if 'cumSumCaInvested' not in ref_stock.keys():
+                # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
+                # use appraisement as previous cumSumCaInvested
+                # N.B. this route is only for the 1st report because reports afterward all have cumSumCaInvested
+                if 'cumSumCaInvestedInKRW' not in ref_stock.keys() and 'cumSumCaInvestedInUSD' not in ref_stock.keys():
+                    stock['cumSumCaInvested'] = stock['appraisement']
+                # in case either cumSumCaInvestedInKRW or cumSumCaInvestedInUSD exists, use them instead
+                else:
+                    stock['cumSumCaInvested'] = 0.0
+                    if 'cumSumCaInvestedInKRW' in ref_stock.keys():
+                        stock['cumSumCaInvested'] += ref_stock['cumSumCaInvestedInKRW'] / self.exchange_rate
+                        del stock['cumSumCaInvestedInKRW']
+                    if 'cumSumCaInvestedInUSD' in ref_stock.keys():
+                        stock['cumSumCaInvested'] += ref_stock['cumSumCaInvestedInUSD']
+                        del stock['cumSumCaInvestedInUSD']
+            else:
+                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + ref_stock['need2investCA']
 
     def _update_holdings(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
@@ -81,8 +93,8 @@ class BaseStock:
 
     def update_all(self):  # call order is crucial
         self._update_holdings()
-        self._update_ca_invested()  # after _update_holdings
         self._derive_appraisement()  # after _update_holdings
+        self._update_ca_invested()  # after _derive_appraisement
 
     def get_stockgrp(self) -> dict:
         return self.stockgrp_info
@@ -397,8 +409,8 @@ class KisStock(BaseStock):
     def update_all(self):  # call order is crucial
         self._collect_prices()
         self._collect_holdings()
-        self._update_ca_invested()  # after _collect_holdings
         self._derive_appraisement()  # after _collect_prices and _collect_holdings
+        self._update_ca_invested()  # after _derive_appraisement
 
 
 class GeckoStock(BaseStock):
@@ -514,8 +526,8 @@ class GeckoStock(BaseStock):
         self._collect_international_prices()
         self._collect_domestic_prices()
         self._derive_kimchi_premium()  # after _collect_international_prices and _collect_domestic_prices
-        self._update_ca_invested()  # after _update_holdings
         self._derive_appraisement()
+        self._update_ca_invested()  # after _derive_appraisement
 
 
 class KrxStock(BaseStock):
@@ -595,5 +607,5 @@ class KrxStock(BaseStock):
         self._update_holdings()  # before _derive_appraisement and prices collection
         self._collect_otp()  # before _collect_prices
         self._collect_prices()  # before _derive_appraisement
-        self._update_ca_invested()  # after _update_holdings
         self._derive_appraisement()
+        self._update_ca_invested()  # after _derive_appraisement
