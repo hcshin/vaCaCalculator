@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import requests
 import stockwrapper
 from tabulate import tabulate
@@ -13,7 +14,8 @@ class Portfolio:
     BASE_CURRENCY = 'USD'
     EXCHANGERATE_LOOKUP_URL = 'https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON'
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
-    EXCHANGERATE_CERT_PATH = 'koreaexim.pem'
+    # resolve relative to this module so the tool can be run from any cwd
+    EXCHANGERATE_CERT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'koreaexim.pem')
 
     def __init__(self, *args) -> None:
         # constructor 1: simple constructor just for printing ref_report
