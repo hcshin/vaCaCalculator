@@ -180,7 +180,7 @@ $ python3 -m pip install -R pip-requirements
 | 항목 | 설명 |
 |------|------|
 | `"KIS"` | 해외/국내 증권에 해당하는 상품들 |
-| `"CoinGecko"` | 코인들.<br>CoinGecko API를 이용하여 가격정보를 수집하여 CoinGecko라고 명명하였음. |
+| `"CoinGecko"` | 코인들.<br>과거 CoinGecko API로 가격정보를 수집하여 CoinGecko라고 명명하였음. 현재는 거래소 API에서 직접 수집(USD: Coinbase, Kraken, Binance.US 중앙값 / KRW: 업비트, 빗썸, 코인원, 코빗 중앙값)하나, 기존 report와의 호환을 위해 이름은 유지. |
 | `"KRX"` | KRX 금현물.<br>주식시장이 아니라 KRX 금시장에 상장되어 거래되는 "금 현물 99.99_1kg" 상품. |
 | `"OTHER"` | 예적금, 현금성 자산 등 가격이 고정돼 있는 상품들.<br>본 프로그램은 이자 등으로 인한 현금성 자산의 가격변동을 추적하지 않음. |
 
@@ -205,7 +205,7 @@ $ python3 -m pip install -R pip-requirements
 | stockgroup | 설명 |
 |------|------|
 | `"KIS"` | 국내주: 종목코드 6자리 (e.g. KODEX200: 069500), 해외주: ticker 3글자 또는 4글자 (e.g. Vanguard S&P500 Index: VOO) |
-| `"CoinGecko"` | 각 코인별 ticker 3자리.<br>현재 코드는 BTC(Bitcoin), ETH(Ethereum), BNB(Binance Coin)만 지원하나, stockwrapper.py GeckoStock class의 SYMB2ID_DICT와 ID2SYMB_DICT를 확장하면 CoinGecko가 지원하는 모든 코인으로 확장 가능 |
+| `"CoinGecko"` | 각 코인별 ticker 3자리.<br>현재 코드는 BTC(Bitcoin), ETH(Ethereum), BNB(Binance Coin)만 지원하나, stockwrapper.py CryptoStock class의 VENUE_SYMBS에 거래소별 심볼을 추가하면 확장 가능 (USD 가격은 최소 2개 거래소 필요) |
 | `"KRX"` | `GLD`. KRX 금현물 하나의 상품을 위한 stockgroup으로서 상품 식별자는 `GLD` 하나만 사용 가능 |
 | `"OTHER"` | 상품 식별자에 대한 제약 없음. OTHER stockgroup 내에서 중복되지만 않는 한 임의의 식별자 사용 가능 |
 

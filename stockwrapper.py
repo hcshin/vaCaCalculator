@@ -27,9 +27,9 @@ class BaseStock:
 
         return res
 
-    def _getWrapper(self, URL, headers=None, params=None, verify=True):
+    def _getWrapper(self, URL, headers=None, params=None, verify=True, timeout=None):
         logger.debug(f'GETing headers {headers} and params {params} to {URL}.')
-        res = requests.get(URL, headers=headers, params=params, verify=verify)
+        res = requests.get(URL, headers=headers, params=params, verify=verify, timeout=timeout)
         logger.debug(f'Got GET response: {res.text}')
 
         return res
@@ -413,106 +413,167 @@ class KisStock(BaseStock):
         self._update_ca_invested()  # after _derive_appraisement
 
 
-class GeckoStock(BaseStock):
-    BASE_CURRENCY = 'usd'
-    SYMB2ID_DICT = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'BNB': 'binancecoin'
+class CryptoStock(BaseStock):
+    # Prices are queried directly from exchanges (no aggregator, no API key).
+    # Each coin's price is the median over the venues that answered, so a single venue being down or off doesn't matter.
+    # A missing venue entry means the venue doesn't list that coin (e.g. Upbit has no KRW-BNB).
+    VENUE_SYMBS = {
+        'BTC': {
+            'coinbase': 'BTC-USD', 'kraken': ('XBTUSD', 'XXBTZUSD'), 'binanceus': 'BTCUSD',
+            'upbit': 'KRW-BTC', 'bithumb': 'KRW-BTC', 'coinone': 'BTC', 'korbit': 'btc_krw'
+        },
+        'ETH': {
+            'coinbase': 'ETH-USD', 'kraken': ('ETHUSD', 'XETHZUSD'), 'binanceus': 'ETHUSD',
+            'upbit': 'KRW-ETH', 'bithumb': 'KRW-ETH', 'coinone': 'ETH', 'korbit': 'eth_krw'
+        },
+        'BNB': {
+            'coinbase': 'BNB-USD', 'kraken': ('BNBUSD', 'BNBUSD'), 'binanceus': 'BNBUSD',
+            'bithumb': 'KRW-BNB', 'coinone': 'BNB', 'korbit': 'bnb_krw'
+        },
     }
-    ID2SYMB_DICT = {
-        'bitcoin': 'BTC',
-        'ethereum': 'ETH',
-        'binancecoin': 'BNB'
-    }
-    ROK_EXCHANGE_IDS = ('bithumb', 'upbit', 'korbit', 'coinone')
+    INTERNATIONAL_VENUES = ('coinbase', 'kraken', 'binanceus')  # quoted in USD
+    DOMESTIC_VENUES = ('upbit', 'bithumb', 'coinone', 'korbit')  # quoted in KRW
 
-    URL_BASE = 'https://api.coingecko.com/api/v3'
-    BASE_HEADER = {'content-type': 'application/json'}
-    SIMPLE_PRICE_INQUIRY_PATH = '/simple/price'
-    EXCHANGEWISE_PRICE_INQUIRY_PATH_HEADER = '/exchanges/'
+    MIN_INTERNATIONAL_VENUES = 2  # price drives appraisement, so require agreement of at least two venues
+    MAX_VENUE_DEVIATION = 0.02  # warn when a venue deviates from the median more than this
+    REQUEST_TIMEOUT_IN_SECS = 10
+    BASE_HEADER = {'content-type': 'application/json', 'User-Agent': 'vaCaCalculator'}
+
+    def _get_json(self, URL, params=None):
+        res = self._getWrapper(URL, CryptoStock.BASE_HEADER, params, timeout=CryptoStock.REQUEST_TIMEOUT_IN_SECS)
+        res.raise_for_status()
+        return res.json()
+
+    def _venue_symbs(self, venue: str) -> dict:
+        # {coin_symb: venue-specific symbol} for the target coins the venue lists
+        return {
+            coin_symb: CryptoStock.VENUE_SYMBS[coin_symb][venue]
+            for coin_symb in self.stockgrp_info['stocks'].keys()
+            if venue in CryptoStock.VENUE_SYMBS[coin_symb]
+        }
+
+    def _fetch_coinbase(self) -> dict:
+        prices = {}
+        for coin_symb, product_id in self._venue_symbs('coinbase').items():
+            ticker = self._get_json(f'https://api.exchange.coinbase.com/products/{product_id}/ticker')
+            prices[coin_symb] = float(ticker['price'])
+        return prices
+
+    def _fetch_kraken(self) -> dict:
+        venue_symbs = self._venue_symbs('kraken')
+        res_json = self._get_json(
+            'https://api.kraken.com/0/public/Ticker',
+            {'pair': ','.join([pair for pair, _ in venue_symbs.values()])}
+        )
+        if res_json['error']:
+            raise ValueError(f'Kraken returned errors: {res_json["error"]}')
+        # the result is keyed by Kraken's internal pair names (e.g. XBTUSD -> XXBTZUSD); 'c' is [last trade price, lot volume]
+        return {coin_symb: float(res_json['result'][result_key]['c'][0]) for coin_symb, (_, result_key) in venue_symbs.items()}
+
+    def _fetch_binanceus(self) -> dict:
+        venue_symbs = self._venue_symbs('binanceus')
+        tickers = self._get_json(
+            'https://api.binance.us/api/v3/ticker/price',
+            {'symbols': json.dumps(list(venue_symbs.values()), separators=(',', ':'))}
+        )
+        symb2price = {ticker['symbol']: float(ticker['price']) for ticker in tickers}
+        return {coin_symb: symb2price[symbol] for coin_symb, symbol in venue_symbs.items()}
+
+    def _fetch_upbit_style(self, URL: str, venue: str) -> dict:
+        # Upbit and Bithumb share this schema. N.B. an unlisted market makes Upbit 404 the whole request, hence _venue_symbs
+        venue_symbs = self._venue_symbs(venue)
+        tickers = self._get_json(URL, {'markets': ','.join(venue_symbs.values())})
+        market2price = {ticker['market']: float(ticker['trade_price']) for ticker in tickers}
+        return {coin_symb: market2price[market] for coin_symb, market in venue_symbs.items()}
+
+    def _fetch_upbit(self) -> dict:
+        return self._fetch_upbit_style('https://api.upbit.com/v1/ticker', 'upbit')
+
+    def _fetch_bithumb(self) -> dict:
+        return self._fetch_upbit_style('https://api.bithumb.com/v1/ticker', 'bithumb')
+
+    def _fetch_coinone(self) -> dict:
+        prices = {}
+        for coin_symb, symbol in self._venue_symbs('coinone').items():
+            res_json = self._get_json(f'https://api.coinone.co.kr/public/v2/ticker_new/KRW/{symbol}')
+            if res_json['result'] != 'success':
+                raise ValueError(f'Coinone returned error code {res_json["error_code"]}')
+            prices[coin_symb] = float(res_json['tickers'][0]['last'])
+        return prices
+
+    def _fetch_korbit(self) -> dict:
+        venue_symbs = self._venue_symbs('korbit')
+        res_json = self._get_json('https://api.korbit.co.kr/v2/tickers', {'symbol': ','.join(venue_symbs.values())})
+        if not res_json['success']:
+            raise ValueError('Korbit returned success=false')
+        symb2price = {ticker['symbol']: float(ticker['close']) for ticker in res_json['data']}
+        return {coin_symb: symb2price[symbol] for coin_symb, symbol in venue_symbs.items()}
+
+    def _collect_venue_prices(self, venues: tuple) -> dict:
+        # returns {coin_symb: {venue: price}}; a failing venue is skipped with a warning
+        venue_prices = {coin_symb: {} for coin_symb in self.stockgrp_info['stocks'].keys()}
+        for venue in venues:
+            try:
+                prices = getattr(self, f'_fetch_{venue}')()
+            except (requests.RequestException, KeyError, IndexError, ValueError, TypeError) as e:
+                logger.warning(f'Failed to collect crypto prices from {venue}, skipping it: {e!r}')
+                continue
+
+            for coin_symb, price in prices.items():
+                if price <= 0:
+                    logger.warning(f'{venue} returned a non-positive price for {coin_symb} ({price}), ignoring it')
+                    continue
+                venue_prices[coin_symb][venue] = price
+
+        # warn about venues far off the median. median itself is robust to a single outlier, so they are kept
+        for coin_symb, prices in venue_prices.items():
+            if not prices:
+                continue
+            median_price = median(prices.values())
+            for venue, price in prices.items():
+                if abs(price / median_price - 1) > CryptoStock.MAX_VENUE_DEVIATION:
+                    logger.warning(f'{coin_symb} price on {venue} ({price}) deviates more than '
+                                   f'{CryptoStock.MAX_VENUE_DEVIATION:.0%} from the median ({median_price})')
+
+        return venue_prices
 
     def _collect_international_prices(self):
-        coin_symbs = self.stockgrp_info['stocks'].keys()
+        for coin_symb in self.stockgrp_info['stocks'].keys():
+            if coin_symb not in CryptoStock.VENUE_SYMBS:
+                error_msg = f'{coin_symb} is not supported. Add it to CryptoStock.VENUE_SYMBS'
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
-        international_price_inquiry_url = f'{GeckoStock.URL_BASE}{GeckoStock.SIMPLE_PRICE_INQUIRY_PATH}'
-        international_price_inquiry_params = {
-            'ids': ','.join([GeckoStock.SYMB2ID_DICT[coin_symb] for coin_symb in coin_symbs]),
-            'vs_currencies': GeckoStock.BASE_CURRENCY
-        }
-        res = self._getWrapper(
-            international_price_inquiry_url,
-            GeckoStock.BASE_HEADER,
-            international_price_inquiry_params
-        )
+        venue_prices = self._collect_venue_prices(CryptoStock.INTERNATIONAL_VENUES)
+        for coin_symb, prices in venue_prices.items():
+            if len(prices) < CryptoStock.MIN_INTERNATIONAL_VENUES:
+                error_msg = (f'Only {len(prices)} venue(s) returned a USD price for {coin_symb} ({prices}); '
+                             f'at least {CryptoStock.MIN_INTERNATIONAL_VENUES} are required')
+                logger.error(error_msg)
+                raise Exception(error_msg)
 
-        # extract prices from the queries
-        price_results = res.json()
-        for coin_id in price_results.keys():
-            self.stockgrp_info['stocks'][GeckoStock.ID2SYMB_DICT[coin_id]]['price'] = \
-                float(price_results[coin_id][GeckoStock.BASE_CURRENCY])
+            self.stockgrp_info['stocks'][coin_symb]['price'] = median(prices.values())
+            logger.info(f'{coin_symb} price: {self.stockgrp_info["stocks"][coin_symb]["price"]} USD (median of {prices})')
 
     def _collect_domestic_prices(self):
-        # prepare exchange-wise price queries
-        domestic_price_inquiry_url_head = f'{GeckoStock.URL_BASE}{GeckoStock.EXCHANGEWISE_PRICE_INQUIRY_PATH_HEADER}'
+        # ROK prices are only used for the Kimchi premium, so missing ones are tolerated
+        venue_prices = self._collect_venue_prices(CryptoStock.DOMESTIC_VENUES)
+        for coin_symb, prices in venue_prices.items():
+            stock = self.stockgrp_info['stocks'][coin_symb]
+            stock.pop('priceROK', None)  # don't carry over the reference report's value
+            if not prices:
+                logger.warning(f'No domestic price collected for {coin_symb}')
+                continue
 
-        # query ROK prices for Kimchi premium
-        ROK_prices = {}  # dict for getting the median of the prices
-
-        # for each target ROK exchanges
-        for ROK_exchange_id in GeckoStock.ROK_EXCHANGE_IDS:
-            coin_symbs = self.stockgrp_info['stocks'].keys()
-            domestic_price_inquiry_url = domestic_price_inquiry_url_head + f'{ROK_exchange_id}/tickers'
-            domestic_price_inquiry_params = {
-                'id': ROK_exchange_id,
-                'coin_ids': ','.join([GeckoStock.SYMB2ID_DICT[coin_symb] for coin_symb in coin_symbs]),
-            }
-            res = self._getWrapper(
-                domestic_price_inquiry_url,
-                GeckoStock.BASE_HEADER,
-                domestic_price_inquiry_params
-            )
-            ROK_tickers = res.json()['tickers']
-            for ROK_ticker in ROK_tickers:
-                if ROK_ticker['base'] not in coin_symbs:
-                    # ignore coins not in coin_symbs
-                    continue
-
-                if ROK_ticker['target'] != 'KRW':
-                    # ignore exchange pairs that does not have KRW as the target currency
-                    continue
-
-                ROK_price = float(ROK_ticker['last'])
-                if ROK_ticker['base'] in ROK_prices.keys():
-                    # if there's already values for the given key
-                    ROK_prices[ROK_ticker['base']].append(ROK_price)
-                else:
-                    # when there is no such a key, add a list as a value
-                    ROK_prices[ROK_ticker['base']] = [ROK_price]
-
-        # check if at least one price is collected for each target coin
-        if len(ROK_prices) != len(coin_symbs):
-            logger.error('Domestic price of at least one coin is not collected.\n'
-                         f'Collected coins list: {ROK_prices.keys()}\n'
-                         f'Target coins list: {coin_symbs}\n')
-
-        # for each cryptocurrency, take the median as the price to be registered to stockgrp_info
-        # and apply exchange rate so that the ROK price is in GeckoStock.BASE_CURRENCY
-        for coin_symb, ROK_prices_list in ROK_prices.items():
-            self.stockgrp_info['stocks'][coin_symb]['priceROK'] = median(ROK_prices_list) / self.exchange_rate
+            # apply exchange rate so that the ROK price is in USD
+            stock['priceROK'] = median(prices.values()) / self.exchange_rate
 
     def _derive_kimchi_premium(self):
         for coin_symb, coin_value in self.stockgrp_info['stocks'].items():
-            if 'price' not in coin_value.keys():
-                error_msg = f'price of a coin should be given in advance to derive Kimchi preimum, but got {coin_value["price"]}'
-                logger.error(error_msg)
-                raise Exception
-
-            if 'priceROK' not in coin_value.keys():
-                error_msg = \
-                    f'priceROK of a coin should be given in advance to derive Kimchi preimum, but got {coin_value["priceROK"]}'
-                logger.error(error_msg)
-                raise Exception
+            coin_value.pop('kimchi', None)  # don't carry over the reference report's value
+            if 'price' not in coin_value.keys() or 'priceROK' not in coin_value.keys():
+                logger.warning(f'Skipping Kimchi premium for {coin_symb}: price or priceROK is missing')
+                continue
 
             coin_value['kimchi'] = float(coin_value['priceROK']) / float(coin_value['price'])
             if coin_value['kimchi'] > 1.05:

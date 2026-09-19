@@ -311,8 +311,8 @@ class Portfolio:
                     stockgroup
                 )
 
-            elif stockgroupkey == 'CoinGecko':
-                stockgroup_handler = stockwrapper.GeckoStock(
+            elif stockgroupkey == 'CoinGecko':  # historical key name kept for report compatibility; prices come from exchanges
+                stockgroup_handler = stockwrapper.CryptoStock(
                     self.this_report['exchange_rate'],
                     self.ref_report['exchange_rate'],
                     stockgroup

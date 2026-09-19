@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 CLI tool that computes Cost Averaging (CA) / Value Averaging (VA) contributions across a mixed
-portfolio (Korean + US equities via KIS Open API, crypto via CoinGecko, KRX gold spot, cash).
+portfolio (Korean + US equities via KIS Open API, crypto via direct exchange APIs, KRX gold spot, cash).
 **USD is the base currency** for every internal calculation — KRW prices/holdings are converted with
 the day's exchange rate from the Korea Eximbank API.
 
@@ -48,7 +48,7 @@ so report files form a chain. The README documents the shape of the initial (see
 `Portfolio.distribute_saving()` is the pipeline, and its step order matters:
 
 1. Dispatch each key under `stockgroups` to a handler by name — `KIS` → `KisStock`,
-   `CoinGecko` → `GeckoStock`, `KRX` → `KrxStock`, anything else (e.g. `OTHER`, fixed-price cash)
+   `CoinGecko` → `CryptoStock` (historical key name), `KRX` → `KrxStock`, anything else (e.g. `OTHER`, fixed-price cash)
    → `BaseStock`. Adding a data source means adding a class and a branch here.
 2. `handler.update_all()` — **each subclass overrides this and the call order inside is a hard
    contract** (holdings → prices → `_derive_appraisement` → `_update_ca_invested`); the comments
@@ -93,9 +93,15 @@ accepted and corrupts `need2investVA`.
 - **KRX gold**: two-step scrape — POST for an OTP, then POST that OTP to download a EUC-KR CSV; the
   browser `User-Agent` and `referer` headers are required. Trading days come from
   `exchange_calendars` (`XKRX`). Only the `GLD` stock key is supported.
-- **CoinGecko**: prices come from `simple/price`, plus per-exchange KRW tickers from four Korean
-  exchanges whose median yields the "kimchi premium" ratio; a warning fires above 5%. Supported
-  coins are limited by `SYMB2ID_DICT`/`ID2SYMB_DICT`.
+- **Crypto (`CryptoStock`, group key `"CoinGecko"`)**: CoinGecko was dropped (its keyless tier
+  rate-limits a single run to HTTP 429). The key stays `"CoinGecko"` because every existing report
+  uses it. USD `price` = median of Coinbase Exchange, Kraken, Binance.US `last` prices. At least 2
+  venues must answer, otherwise the run raises. KRW `priceROK` = median of Upbit, Bithumb, Coinone,
+  Korbit ÷ exchange rate. It feeds only the "kimchi premium" warning (>5%), so a missing value
+  is logged and skipped. A failing venue logs a warning and is skipped, and venues >2% off the
+  median are warned about. Per-venue symbols live in `VENUE_SYMBS`, where a missing entry means
+  the venue doesn't list the coin. Gotchas: Upbit has no KRW-BNB and 404s the *whole* request if
+  any market is unknown; Kraken keys its result by internal pair names (`XBTUSD` → `XXBTZUSD`).
 
 ## Conventions
 
