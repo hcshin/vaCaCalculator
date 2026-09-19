@@ -2,12 +2,8 @@ import logging
 import requests
 import copy
 import json
-import csv
-import exchange_calendars as xcals
-import pandas
 from statistics import median
-from datetime import datetime, timedelta
-from io import StringIO
+from datetime import datetime
 
 
 logger = logging.getLogger('autoinvestment_logger')
@@ -591,82 +587,75 @@ class CryptoStock(BaseStock):
         self._update_ca_invested()  # after _derive_appraisement
 
 
-class KrxStock(BaseStock):
-    OTP_GENERATE_URL = 'http://data.krx.co.kr/comm/fileDn/GenerateOTP/generate.cmd'
-    OTP_GENERATE_HEADERS = {
-        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
-                       'AppleWebKit/537.36 (KHTML, like Gecko)'
-                       'Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0')
-    }
-    OTP_GENERATE_PAYLOAD_BASE = {
-        'locale': 'en_US',
-        'isuCd': 'KRD040200002',
-        'share': '1',
-        'money': '1',
-        'csvxls_isNo': 'false',
-        'name': 'fileDown',
-        'url': 'dbms/MDC/STAT/standard/MDCSTAT15001'
-    }
-    PRICE_CSV_DOWNLOAD_URL = 'http://data.krx.co.kr/comm/fileDn/download_csv/download.cmd'
-    PRICE_CSV_DOWNLOAD_HEADERS = OTP_GENERATE_HEADERS
-    PRICE_CSV_ENCODING = 'euc-kr'
-    TRADING_DAY_LOOKUP_WINDOW_IN_DAYS = 10
+class KrxStock(KisStock):
+    # KRX gold spot "금 99.99_1kg" (KRW per gram). data.krx.co.kr now requires an API key, so the price comes from the KIS
+    # domestic price inquiry, which lists the gold market under its KRX short code.
+    # N.B. the 'M' prefix is required: '04020000' is answered with rt_cd '0' and a price of 0
+    GOLD_ISCD = {'GLD': 'M04020000'}
 
-    def _get_recent_trading_dates(self) -> pandas.DatetimeIndex:
-        # instantiate xcals for KRX
-        xkrx = xcals.get_calendar('XKRX')
-
-        # query window-days of time for trading days and get the last trading day from the result
-        today = datetime.today()
-        window_from_date = (today - timedelta(days=KrxStock.TRADING_DAY_LOOKUP_WINDOW_IN_DAYS)).strftime('%Y-%m-%d')
-        window_to_date = today.strftime('%Y-%m-%d')
-
-        return xkrx.sessions_in_range(window_from_date, window_to_date)  # Caution not %Y-%m-%d!
-
-    def _collect_otp(self):
-        # complete OTP request payload
-        otp_requeust_payload = copy.deepcopy(KrxStock.OTP_GENERATE_PAYLOAD_BASE)
-        recent_trading_days = self._get_recent_trading_dates()
-        otp_requeust_payload['strtDd'] = recent_trading_days[0].strftime('%Y%m%d')  # Caution not %Y-%m-%d
-        otp_requeust_payload['endDd'] = recent_trading_days[-1].strftime('%Y%m%d')
-
-        # get OTP from the response
-        otp_resp = self._postWrapper(KrxStock.OTP_GENERATE_URL,
-                                     headers=KrxStock.OTP_GENERATE_HEADERS,
-                                     data=otp_requeust_payload)
-        self.otp = otp_resp.text.strip()
+    # unofficial Naver quote, used only to cross-check the KIS price
+    CROSS_CHECK_URL = 'https://m.stock.naver.com/front-api/marketIndex/productDetail'
+    CROSS_CHECK_PARAMS = {'category': 'metals', 'reutersCode': 'M04020000'}
+    MAX_CROSS_CHECK_DEVIATION = 0.01  # warn when the cross-check price deviates from the KIS price more than this
+    REQUEST_TIMEOUT_IN_SECS = 10
 
     def _collect_prices(self):
-        # complete request for download.cmd
-        download_request_headers = copy.deepcopy(KrxStock.PRICE_CSV_DOWNLOAD_HEADERS)
-        download_request_headers['referer'] = KrxStock.OTP_GENERATE_URL
-        download_request_payload = {'code': self.otp}
+        price_inquiry_url = f'{KisStock.URL_BASE}/{KisStock.DOM_PRICE_INQUIRY_PATH}'
+        price_inquiry_headers = copy.deepcopy(KisStock.BASE_HEADER)
+        price_inquiry_headers['authorization'] = f'Bearer {self.access_token}'
+        price_inquiry_headers['appkey'] = self.APP_KEY
+        price_inquiry_headers['appsecret'] = self.APP_SECRET
+        price_inquiry_headers['tr_id'] = KisStock.TR_ID_CURR_DOM_PRICE
 
-        # get a CSV containing the price from the response
-        download_resp = self._postWrapper(
-            KrxStock.PRICE_CSV_DOWNLOAD_URL,
-            headers=download_request_headers,
-            data=download_request_payload
-        )
-        price_csv = StringIO(download_resp.content.decode(KrxStock.PRICE_CSV_ENCODING))
-        price_csv_parsed = csv.DictReader(price_csv)
-
-        # access stockgrp_info element
         for stockkey, stock in self.stockgrp_info['stocks'].items():
-            if stockkey == 'GLD':
-                # extract price from CSV. We only need the most recent price (the top row)
-                for price_record in price_csv_parsed:
-                    stock['price'] = float(price_record['종가'])
-                    logger.info(f'Current price of {stockkey} is {stock["price"]} {stock["currency"]}')
-                    break  # for the case we have more than one record (this happens when it has just passed midnight)
-            else:
+            if stockkey not in KrxStock.GOLD_ISCD:
                 error_msg = f'KrxStock currently supports only \'GLD\' as a stocks member. However {stockkey} given'
                 logger.error(error_msg)
                 raise Exception(error_msg)
 
+            price_inquiry_params = {
+                'fid_cond_mrkt_div_code': 'J',
+                'fid_input_iscd': KrxStock.GOLD_ISCD[stockkey]
+            }
+            res = self._getWrapper(price_inquiry_url, price_inquiry_headers, price_inquiry_params,
+                                   timeout=KrxStock.REQUEST_TIMEOUT_IN_SECS)
+
+            # check success
+            if res.json()['rt_cd'] != '0':
+                error_msg = f'KRX gold price query for {stockkey} failed: {res.json()["msg1"]}'
+                logger.error(error_msg)
+                raise Exception(error_msg)
+
+            price = float(res.json()['output']['stck_prpr'])
+            if price <= 0:  # an unknown code is answered with a zero price rather than an error
+                error_msg = f'KRX gold price query for {stockkey} returned a non-positive price ({price})'
+                logger.error(error_msg)
+                raise Exception(error_msg)
+
+            stock['price'] = price
+            logger.info(f'Current price of {stockkey} is {stock["price"]} {stock["currency"]}')
+
+    def _cross_check_price(self):
+        # informational only: any failure is logged and skipped
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            try:
+                res = self._getWrapper(KrxStock.CROSS_CHECK_URL, {'User-Agent': 'vaCaCalculator'}, KrxStock.CROSS_CHECK_PARAMS,
+                                       timeout=KrxStock.REQUEST_TIMEOUT_IN_SECS)
+                res.raise_for_status()
+                check_price = float(res.json()['result']['closePrice'].replace(',', ''))
+            except (requests.RequestException, KeyError, TypeError, ValueError, AttributeError) as e:
+                logger.warning(f'Failed to cross-check the {stockkey} price, skipping it: {e!r}')
+                continue
+
+            if abs(check_price / stock['price'] - 1) > KrxStock.MAX_CROSS_CHECK_DEVIATION:
+                logger.warning(f'{stockkey} price from KIS ({stock["price"]}) deviates more than '
+                               f'{KrxStock.MAX_CROSS_CHECK_DEVIATION:.0%} from the cross-check price ({check_price})')
+            else:
+                logger.info(f'{stockkey} price cross-checked ({check_price})')
+
     def update_all(self):  # call order is crucial
-        self._update_holdings()  # before _derive_appraisement and prices collection
-        self._collect_otp()  # before _collect_prices
+        self._update_holdings()  # before _derive_appraisement and prices collection. holdings are manual (no KIS balance query)
         self._collect_prices()  # before _derive_appraisement
+        self._cross_check_price()  # after _collect_prices
         self._derive_appraisement()
         self._update_ca_invested()  # after _derive_appraisement

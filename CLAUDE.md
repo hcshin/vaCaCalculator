@@ -90,9 +90,14 @@ accepted and corrupts `need2investVA`.
 - **KIS US prices**: a night-session `EXCD` (`NYS`/`NAS`/`AMS`) returning an empty `last` is retried
   once with the daytime code via `EXCD_NIGHT2DAY_DICT`. Both holdings and prices paginate on the
   `tr_cont` response header (`F`/`M` = continue, `D`/`E` = done).
-- **KRX gold**: two-step scrape — POST for an OTP, then POST that OTP to download a EUC-KR CSV; the
-  browser `User-Agent` and `referer` headers are required. Trading days come from
-  `exchange_calendars` (`XKRX`). Only the `GLD` stock key is supported.
+- **KRX gold (`KrxStock`, a `KisStock` subclass)**: `data.krx.co.kr` downloads now require an
+  enrolled API key, so the price of 금 99.99_1kg (KRW/g) comes from KIS `inquire-price` with the gold
+  market short code `M04020000` (the dispatcher passes the KIS secrets/tokens to `KrxStock` too).
+  The `M` prefix matters: `04020000` is answered with `rt_cd` `0` and a price of `0`, hence the
+  `price > 0` guard. KIS `search-stock-info` does not know the gold market. The price is
+  cross-checked against an unofficial Naver quote, warn-only (>1% deviation, or on failure).
+  Holdings stay manual (`actualInvestedInUnits`); no balance query. Only the `GLD` stock key
+  is supported.
 - **Crypto (`CryptoStock`, group key `"CoinGecko"`)**: CoinGecko was dropped (its keyless tier
   rate-limits a single run to HTTP 429). The key stays `"CoinGecko"` because every existing report
   uses it. USD `price` = median of Coinbase Exchange, Kraken, Binance.US `last` prices. At least 2

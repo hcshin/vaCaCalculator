@@ -181,7 +181,7 @@ $ python3 -m pip install -R pip-requirements
 |------|------|
 | `"KIS"` | 해외/국내 증권에 해당하는 상품들 |
 | `"CoinGecko"` | 코인들.<br>과거 CoinGecko API로 가격정보를 수집하여 CoinGecko라고 명명하였음. 현재는 거래소 API에서 직접 수집(USD: Coinbase, Kraken, Binance.US 중앙값 / KRW: 업비트, 빗썸, 코인원, 코빗 중앙값)하나, 기존 report와의 호환을 위해 이름은 유지. |
-| `"KRX"` | KRX 금현물.<br>주식시장이 아니라 KRX 금시장에 상장되어 거래되는 "금 현물 99.99_1kg" 상품. |
+| `"KRX"` | KRX 금현물.<br>주식시장이 아니라 KRX 금시장에 상장되어 거래되는 "금 99.99_1kg" 상품(단위: 원/g).<br>가격은 한국투자 Open API(종목코드 `M04020000`)로 조회하므로 KIS stockgroup이 없더라도 KIS secrets/tokens 파일이 필요함. |
 | `"OTHER"` | 예적금, 현금성 자산 등 가격이 고정돼 있는 상품들.<br>본 프로그램은 이자 등으로 인한 현금성 자산의 가격변동을 추적하지 않음. |
 
 각 stockgroup은 중첩된 dict 형태로 구성돼 있으며 아래와 같은 요소들을 가집니다.

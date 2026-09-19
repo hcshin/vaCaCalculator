@@ -318,10 +318,12 @@ class Portfolio:
                     stockgroup
                 )
 
-            elif stockgroupkey == 'KRX':
+            elif stockgroupkey == 'KRX':  # gold spot price comes through KIS, hence the secrets
                 stockgroup_handler = stockwrapper.KrxStock(
                     self.this_report['exchange_rate'],
                     self.ref_report['exchange_rate'],
+                    self.secrets_fname,
+                    self.tokens_fname,
                     stockgroup
                 )
 
