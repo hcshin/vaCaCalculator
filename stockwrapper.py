@@ -144,6 +144,8 @@ class KisStock(BaseStock):
     # = US
     OVRS_EXCG_CD = 'NASD'  # NYS + NAS
     TR_CRCY_CD = 'USD'  # Currency for the trading
+    # = Paging
+    MAX_HOLDINGS_PAGES = 100
 
     def __init__(self, exchange_rate: float, ref_exchange_rate: float, secrets_fname: str, tokens_fname: str, stockgrp_info: dict):
         super().__init__(exchange_rate, ref_exchange_rate, stockgrp_info)
@@ -320,7 +322,9 @@ class KisStock(BaseStock):
 
         # query the holdings
         is_all = False
+        num_pages = 0
         while not is_all:
+            num_pages = self._count_page(num_pages)
             res = self._getWrapper(dom_holdings_inquiry_url, dom_holdings_inquiry_headers, dom_holdings_inquiry_params)
 
             # check success
@@ -378,7 +382,9 @@ class KisStock(BaseStock):
 
         # query the holdings
         is_all = False
+        num_pages = 0
         while not is_all:
+            num_pages = self._count_page(num_pages)
             res = self._getWrapper(us_holdings_inquiry_url, us_holdings_inquiry_headers, us_holdings_inquiry_params)
 
             if res.json()['rt_cd'] != '0':
@@ -415,6 +421,15 @@ class KisStock(BaseStock):
         for stock in self.stockgrp_info['stocks'].values():
             if stock['market'] in markets:
                 stock['holdings'] = 0
+
+    def _count_page(self, num_pages: int) -> int:
+        # N.B. continuation requests are identical to the first one, so a server that keeps answering 'F'/'M' would loop forever
+        num_pages += 1
+        if num_pages > KisStock.MAX_HOLDINGS_PAGES:
+            error_msg = f'holdings query exceeded {KisStock.MAX_HOLDINGS_PAGES} pages'
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        return num_pages
 
     def update_all(self):  # call order is crucial
         self._collect_prices()
