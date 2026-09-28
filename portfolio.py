@@ -198,8 +198,9 @@ class Portfolio:
                 else:  # if ref_stock does not have price info, use that of this_stock instead
                     actual_inv_increment = this_stock['price'] * actualInvestedInUnits
                 # if currency is KRW divide actual_inv_increment by exchange_rate
+                # N.B. use ref_report's exchange rate, the one ref_report's need2invest was derived with
                 if this_stock['currency'] == 'KRW':
-                    actual_inv_increment /= self.exchange_rate
+                    actual_inv_increment /= self.ref_report['exchange_rate']
 
                 if 'need2invest' in ref_stock.keys():
                     inv_deviation = ref_stock['need2invest'] - actual_inv_increment
