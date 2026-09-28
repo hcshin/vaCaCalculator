@@ -2,6 +2,7 @@ import logging
 import requests
 import copy
 import json
+import time
 from statistics import median
 from datetime import datetime
 
@@ -148,6 +149,15 @@ class KisStock(BaseStock):
     # = Paging
     MAX_HOLDINGS_PAGES = 100
 
+    # - Rate limit
+    # N.B. a live account allows 20 calls/sec per app key, beyond which KIS answers HTTP 500 with msg_cd EGW00201.
+    # pace at half of it, since consecutive runs (e.g. two chains sharing an app key) share the same budget
+    MIN_CALL_INTERVAL_IN_SECS = 0.1
+    RATE_LIMIT_MSG_CD = 'EGW00201'
+    RATE_LIMIT_RETRY_WAIT_IN_SECS = 1.0
+    MAX_RATE_LIMIT_RETRIES = 3
+    last_call_time = 0.0  # class-level, so KisStock and KrxStock instances share the pacing
+
     def __init__(self, exchange_rate: float, ref_exchange_rate: float, secrets_fname: str, tokens_fname: str, stockgrp_info: dict):
         super().__init__(exchange_rate, ref_exchange_rate, stockgrp_info)
 
@@ -226,7 +236,7 @@ class KisStock(BaseStock):
                     'fid_cond_mrkt_div_code': 'J',
                     'fid_input_iscd': stockkey
                 }
-                res = self._getWrapper(dom_price_inquiry_url, dom_price_inquiry_headers, price_inquiry_params)
+                res = self._kis_get(dom_price_inquiry_url, dom_price_inquiry_headers, price_inquiry_params)
 
                 self._check_kis_response(res, f'dom price query for stock {stockkey}')
 
@@ -240,7 +250,7 @@ class KisStock(BaseStock):
                 }
                 daytime_tried = False
                 while True:
-                    res = self._getWrapper(us_price_inquiry_url, us_price_inquiry_headers, price_inquiry_params)
+                    res = self._kis_get(us_price_inquiry_url, us_price_inquiry_headers, price_inquiry_params)
 
                     # N.B. check before reading output. a failed query has no output, which would hide the error as a KeyError
                     self._check_kis_response(res, f'US price query for stock {stockkey}')
@@ -319,7 +329,7 @@ class KisStock(BaseStock):
         num_pages = 0
         while not is_all:
             num_pages = self._count_page(num_pages)
-            res = self._getWrapper(dom_holdings_inquiry_url, dom_holdings_inquiry_headers, dom_holdings_inquiry_params)
+            res = self._kis_get(dom_holdings_inquiry_url, dom_holdings_inquiry_headers, dom_holdings_inquiry_params)
 
             self._check_kis_response(res, 'dom holdings query')
 
@@ -375,7 +385,7 @@ class KisStock(BaseStock):
         num_pages = 0
         while not is_all:
             num_pages = self._count_page(num_pages)
-            res = self._getWrapper(us_holdings_inquiry_url, us_holdings_inquiry_headers, us_holdings_inquiry_params)
+            res = self._kis_get(us_holdings_inquiry_url, us_holdings_inquiry_headers, us_holdings_inquiry_params)
 
             self._check_kis_response(res, 'us holdings query')
 
@@ -403,6 +413,25 @@ class KisStock(BaseStock):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
             if stock['holdings'] == 0 and self.ref_stockgrp_info['stocks'][stockkey].get('holdings', 0) > 0:
                 logger.warning(f'{stockkey} is no longer held (holdings {self.ref_stockgrp_info["stocks"][stockkey]["holdings"]} -> 0)')
+
+    def _kis_get(self, URL, headers=None, params=None, timeout=None):
+        for num_retries in range(KisStock.MAX_RATE_LIMIT_RETRIES + 1):
+            wait = KisStock.last_call_time + KisStock.MIN_CALL_INTERVAL_IN_SECS - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            KisStock.last_call_time = time.monotonic()
+            res = self._getWrapper(URL, headers, params, timeout=timeout)
+
+            try:
+                msg_cd = res.json().get('msg_cd')
+            except ValueError:  # not a JSON body. leave it to the caller's check
+                return res
+            if msg_cd != KisStock.RATE_LIMIT_MSG_CD or num_retries == KisStock.MAX_RATE_LIMIT_RETRIES:
+                return res  # a rate limit that outlasts the retries is raised by the caller's check
+
+            logger.warning(f'KIS rate limit hit ({msg_cd}). retrying in {KisStock.RATE_LIMIT_RETRY_WAIT_IN_SECS} s '
+                           f'({num_retries + 1}/{KisStock.MAX_RATE_LIMIT_RETRIES})')
+            time.sleep(KisStock.RATE_LIMIT_RETRY_WAIT_IN_SECS)
 
     def _check_kis_response(self, res, what: str):
         res_json = res.json()
@@ -640,8 +669,8 @@ class KrxStock(KisStock):
                 'fid_cond_mrkt_div_code': 'J',
                 'fid_input_iscd': KrxStock.GOLD_ISCD[stockkey]
             }
-            res = self._getWrapper(price_inquiry_url, price_inquiry_headers, price_inquiry_params,
-                                   timeout=KrxStock.REQUEST_TIMEOUT_IN_SECS)
+            res = self._kis_get(price_inquiry_url, price_inquiry_headers, price_inquiry_params,
+                                timeout=KrxStock.REQUEST_TIMEOUT_IN_SECS)
 
             self._check_kis_response(res, f'KRX gold price query for {stockkey}')
 

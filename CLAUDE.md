@@ -86,6 +86,9 @@ accepted and corrupts `need2investVA`.
 - **KIS tokens**: access tokens last 24h and KIS forbids re-issuing them frequently. The token file
   is read, reused while fresh, and only rewritten on expiry. One secrets/tokens pair per account —
   a report can name exactly one `accountNo`.
+- **KIS rate limit**: 20 calls/sec per app key on a live account; the excess is answered with HTTP 500,
+  `rt_cd` `1`, `msg_cd` `EGW00201`. Every KIS GET goes through `KisStock._kis_get`, which paces calls
+  ≥0.1 s apart (class-level, shared with `KrxStock`) and retries EGW00201 up to 3 times after 1 s.
 - **KIS pension/IRP accounts** are detected by `ACNT_PRDT_CD == '29'` (the suffix of `accountNo`)
   and use a different path and `tr_id`. Domestic-only.
 - **KIS US prices**: a night-session `EXCD` (`NYS`/`NAS`/`AMS`) returning an empty `last` is retried
