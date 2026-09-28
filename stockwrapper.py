@@ -315,6 +315,9 @@ class KisStock(BaseStock):
                 'CTX_AREA_NK100': ''
             }
 
+        # a fully sold stock is not returned by the API, so reset holdings first. otherwise it keeps the ref report's holdings
+        self._reset_holdings(('DOM',))
+
         # query the holdings
         is_all = False
         while not is_all:
@@ -371,6 +374,8 @@ class KisStock(BaseStock):
             'CTX_AREA_NK200': ''
         }
 
+        self._reset_holdings(('NYS', 'NAS', 'AMS'))
+
         # query the holdings
         is_all = False
         while not is_all:
@@ -401,6 +406,15 @@ class KisStock(BaseStock):
             else:
                 logger.error(f'Invalid tr_cont value ({tr_cont}) in querying holdings')
                 raise ValueError
+
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            if stock['holdings'] == 0 and self.ref_stockgrp_info['stocks'][stockkey].get('holdings', 0) > 0:
+                logger.warning(f'{stockkey} is no longer held (holdings {self.ref_stockgrp_info["stocks"][stockkey]["holdings"]} -> 0)')
+
+    def _reset_holdings(self, markets: tuple):
+        for stock in self.stockgrp_info['stocks'].values():
+            if stock['market'] in markets:
+                stock['holdings'] = 0
 
     def update_all(self):  # call order is crucial
         self._collect_prices()

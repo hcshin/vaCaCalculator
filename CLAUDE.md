@@ -65,7 +65,8 @@ purchases/sales (see the long commit message on 5dcd12a). Do not "fix" it to tra
 investment — that causes over-selling under VA. Real trades enter through `holdings`: for non-KIS
 groups the user hand-edits `actualInvestedInUnits` into the report and `_update_holdings` folds it
 into `holdings` and deletes it; KIS holdings come from the API and any `actualInvestedInUnits` there
-is warned about and dropped.
+is warned about and dropped. KIS holdings are reset to 0 before the balance query, since a fully sold
+stock isn't returned by the API.
 
 Bootstrapping (first report only): when a stock has none of `cumSumCaInvested`,
 `cumSumCaInvestedInKRW`, `cumSumCaInvestedInUSD`, current appraisement is used as the seed;
