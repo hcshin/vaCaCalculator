@@ -228,11 +228,7 @@ class KisStock(BaseStock):
                 }
                 res = self._getWrapper(dom_price_inquiry_url, dom_price_inquiry_headers, price_inquiry_params)
 
-                # check success
-                if res.json()['rt_cd'] != '0':
-                    error_msg = f'dom price query for stock {stockkey} failed.'
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                self._check_kis_response(res, f'dom price query for stock {stockkey}')
 
                 stock['price'] = float(res.json()['output']['stck_prpr'])  # update price as this month's value
 
@@ -246,13 +242,10 @@ class KisStock(BaseStock):
                 while True:
                     res = self._getWrapper(us_price_inquiry_url, us_price_inquiry_headers, price_inquiry_params)
 
-                    stockprice = res.json()['output']['last']
+                    # N.B. check before reading output. a failed query has no output, which would hide the error as a KeyError
+                    self._check_kis_response(res, f'US price query for stock {stockkey}')
 
-                    # check success
-                    if res.json()['rt_cd'] != '0':
-                        error_msg = f'US price query for stock {stockkey} failed.'
-                        logger.error(error_msg)
-                        raise Exception(error_msg)
+                    stockprice = res.json()['output']['last']
 
                     if stockprice == '':  # this happens when there's no such a stock within the given market
                         # when night EXCD fails try once more this daytime EXCD
@@ -328,11 +321,7 @@ class KisStock(BaseStock):
             num_pages = self._count_page(num_pages)
             res = self._getWrapper(dom_holdings_inquiry_url, dom_holdings_inquiry_headers, dom_holdings_inquiry_params)
 
-            # check success
-            if res.json()['rt_cd'] != '0':
-                error_msg = 'dom holdings query failed.'
-                logger.error(error_msg)
-                raise Exception(error_msg)
+            self._check_kis_response(res, 'dom holdings query')
 
             # get holdings amount to corresponding stock and derive the increment from ref_report
             stocks = res.json()['output1']
@@ -388,10 +377,7 @@ class KisStock(BaseStock):
             num_pages = self._count_page(num_pages)
             res = self._getWrapper(us_holdings_inquiry_url, us_holdings_inquiry_headers, us_holdings_inquiry_params)
 
-            if res.json()['rt_cd'] != '0':
-                error_msg = 'us holdings query failed.'
-                logger.error(error_msg)
-                raise Exception(error_msg)
+            self._check_kis_response(res, 'us holdings query')
 
             # add holdings amount to corresponding stock
             stocks = res.json()['output1']
@@ -417,6 +403,13 @@ class KisStock(BaseStock):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
             if stock['holdings'] == 0 and self.ref_stockgrp_info['stocks'][stockkey].get('holdings', 0) > 0:
                 logger.warning(f'{stockkey} is no longer held (holdings {self.ref_stockgrp_info["stocks"][stockkey]["holdings"]} -> 0)')
+
+    def _check_kis_response(self, res, what: str):
+        res_json = res.json()
+        if res_json.get('rt_cd') != '0':
+            error_msg = f'{what} failed: HTTP {res.status_code} {res_json.get("msg_cd")} {res_json.get("msg1")}'
+            logger.error(error_msg)
+            raise Exception(error_msg)
 
     def _reset_holdings(self, markets: tuple):
         for stock in self.stockgrp_info['stocks'].values():
@@ -650,11 +643,7 @@ class KrxStock(KisStock):
             res = self._getWrapper(price_inquiry_url, price_inquiry_headers, price_inquiry_params,
                                    timeout=KrxStock.REQUEST_TIMEOUT_IN_SECS)
 
-            # check success
-            if res.json()['rt_cd'] != '0':
-                error_msg = f'KRX gold price query for {stockkey} failed: {res.json()["msg1"]}'
-                logger.error(error_msg)
-                raise Exception(error_msg)
+            self._check_kis_response(res, f'KRX gold price query for {stockkey}')
 
             price = float(res.json()['output']['stck_prpr'])
             if price <= 0:  # an unknown code is answered with a zero price rather than an error
