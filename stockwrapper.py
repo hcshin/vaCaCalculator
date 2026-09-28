@@ -86,6 +86,7 @@ class BaseStock:
 
             else:
                 logger.error(f'Currently only KRW or USD are supported as currencies, but {stock["currency"]} given.')
+                raise NotImplementedError
 
     def update_all(self):  # call order is crucial
         self._update_holdings()

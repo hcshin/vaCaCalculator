@@ -89,14 +89,18 @@ class Portfolio:
             else:
                 querydate -= timedelta(days=1)
 
-        for ele in resp.json()[-1:0:-1]:
-            if ele['cur_unit'] == Portfolio.BASE_CURRENCY:
+        for ele in reversed(resp.json()):
+            if ele.get('cur_unit') == Portfolio.BASE_CURRENCY:
                 try:
                     return float(ele['deal_bas_r'].replace(',', ''))  # key for trading standard rate
                 except ValueError:
-                    return 0.0
+                    error_msg = f'invalid exchange rate for {Portfolio.BASE_CURRENCY}: {ele["deal_bas_r"]}'
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
 
-        return 0.0
+        error_msg = f'no exchange rate for {Portfolio.BASE_CURRENCY} in the response: {resp.json()}'
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
     def _derive_total_appraisement(self):
         # do nothing if this_report['total_appraisement'] already exists
@@ -111,11 +115,14 @@ class Portfolio:
     def _print_report(self, report_to_print: dict):
         logger.debug('_print_report called')
 
-        print(f'Strategy: {report_to_print["strategy"]}')
+        # seed reports have no total_appraisement. only derived reports can be printed
+        if 'total_appraisement' not in report_to_print.keys():
+            error_msg = 'report has no total_appraisement. only derived reports can be printed'
+            logger.error(error_msg)
+            raise KeyError(error_msg)
 
-        # print total_appraisement if available
-        if 'total_appraisement' in report_to_print.keys():
-            print(f'Total Appraisement: {report_to_print["total_appraisement"]:.2f}')
+        print(f'Strategy: {report_to_print["strategy"]}')
+        print(f'Total Appraisement: {report_to_print["total_appraisement"]:.2f}')
 
         table_header = ('stock',
                         'priceUsd',
