@@ -102,6 +102,20 @@ class Portfolio:
         logger.error(error_msg)
         raise ValueError(error_msg)
 
+    def _days_since_ref_report(self) -> int:
+        if 'date' not in self.ref_report.keys():
+            error_msg = 'the reference report has no date, needed to accrue interest. add "date": "YYYY-MM-DD" (the day it was derived)'
+            logger.error(error_msg)
+            raise KeyError(error_msg)
+
+        days = (datetime.strptime(self.this_report['date'], '%Y-%m-%d') - datetime.strptime(self.ref_report['date'], '%Y-%m-%d')).days
+        if days < 0:
+            error_msg = f'the reference report date {self.ref_report["date"]} is in the future'
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        return days
+
     def _derive_total_appraisement(self):
         # do nothing if this_report['total_appraisement'] already exists
         if 'total_appraisement' not in self.this_report.keys():
@@ -306,6 +320,7 @@ class Portfolio:
         self.this_report['savingInKRW'] = self.savingInKRW
         self.this_report['savingInUSD'] = self.savingInUSD
         self.this_report['exchange_rate'] = self.exchange_rate
+        self.this_report['date'] = datetime.today().strftime('%Y-%m-%d')
 
         # update all values of each stockgroup
         self.this_report['stockgroups'] = {}
@@ -333,6 +348,22 @@ class Portfolio:
                     self.secrets_fname,
                     self.tokens_fname,
                     stockgroup
+                )
+
+            elif stockgroupkey == 'KDB':  # USD time deposits, accruing interest since the ref report
+                stockgroup_handler = stockwrapper.KdbDepositStock(
+                    self.this_report['exchange_rate'],
+                    self.ref_report['exchange_rate'],
+                    stockgroup,
+                    self._days_since_ref_report()
+                )
+
+            elif stockgroupkey == 'PENSION_DEPOSIT':  # KRW 원리금보장 products in a pension account, accruing interest
+                stockgroup_handler = stockwrapper.PensionDepositStock(
+                    self.this_report['exchange_rate'],
+                    self.ref_report['exchange_rate'],
+                    stockgroup,
+                    self._days_since_ref_report()
                 )
 
             else:

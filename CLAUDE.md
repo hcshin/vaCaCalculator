@@ -48,7 +48,8 @@ so report files form a chain. The README documents the shape of the initial (see
 `Portfolio.distribute_saving()` is the pipeline, and its step order matters:
 
 1. Dispatch each key under `stockgroups` to a handler by name — `KIS` → `KisStock`,
-   `CoinGecko` → `CryptoStock` (historical key name), `KRX` → `KrxStock`, anything else (e.g. `OTHER`, fixed-price cash)
+   `CoinGecko` → `CryptoStock` (historical key name), `KRX` → `KrxStock`, `KDB` → `KdbDepositStock`
+   and `PENSION_DEPOSIT` → `PensionDepositStock` (deposits accruing interest), anything else (e.g. `OTHER`, fixed-price cash)
    → `BaseStock`. Adding a data source means adding a class and a branch here.
 2. `handler.update_all()` — **each subclass overrides this and the call order inside is a hard
    contract** (holdings → prices → `_derive_appraisement` → `_update_ca_invested`); the comments
@@ -111,6 +112,31 @@ accepted and corrupts `need2investVA`.
   median are warned about. Per-venue symbols live in `VENUE_SYMBS`, where a missing entry means
   the venue doesn't list the coin. Gotchas: Upbit has no KRW-BNB and 404s the *whole* request if
   any market is unknown; Kraken keys its result by internal pair names (`XBTUSD` → `XXBTZUSD`).
+
+- **Deposits (`DepositStock` base)**: no account API, so a line accrues approximate interest into
+  `accruedInterest` (in the line's currency), never into `holdings` (so `cum_inv_deviation` doesn't count it as
+  investment); `appraisement` = (principal + `accruedInterest`), converted to USD. Accrual per run =
+  (ref principal + ref accrued) × `_get_rate` × (1 − `INTEREST_TAX_RATE`) × days/365. Subclasses supply the rate,
+  tax rate and supported currencies.
+- **KDB deposit rate (`KdbDepositStock`, group key `"KDB"`, USD, 15.4% tax)**: the rate is
+  the mean of KDB's posted 외화정기예금 USD 12-month resident rate on today and 91/182/273 days ago, from the
+  unauthenticated `POST https://banking.kdb.co.kr/bp/CBADIE06R01.jct` with form field `_JSON_={"BSE_DT":"YYYYMMDD"}`
+  (the endpoint behind the public page `CBADIE06N01.act`; the `.json`/`.act` variants return HTML). Rows are picked by
+  `RATE_ROW` (`PRD_IRT_C` 600020020001, `CUR_C` USD, `IRT_KD_C` 2004 = resident, `PRD_IRT_STG_TC1` 0012000);
+  the rate is `IRT_BSE_VL` in %. A weekend/holiday date returns the last effective rate (`ALY_STT_DT`); history
+  goes back 4 years. Accrual needs `days` since the ref report, from the top-level `date` field that every derived
+  report now carries; a ref report without it raises. VA treats interest like any other return: no path growth,
+  no sell clamp (deposits can't be broken early, so acting on a sell signal is the user's call).
+- **Pension deposit rate (`PensionDepositStock`, group key `"PENSION_DEPOSIT"`, KRW, no tax)**: KIS posts only the
+  current month's 원리금보장 rates, as server-rendered HTML at `GET https://securities.koreainvestment.com/pension/
+  nwEtcinfo/BizNotice.jsp?cmd=A_NW_32950&templetPopup=Y` (the popup variant drops the site chrome). ~300 rows in
+  two tables (자사/타사제공): `<td>` 상품명, 만기, then DB, DC, IRP rates in %. The month comes from the heading
+  `금리 적용일자: YYYY-MM-DD ~ …`; the page flips to next month's rates around the 28th. Each run takes the max IRP
+  rate over every product and maturity, writes it into the stock's `rateHistory` (one entry per month, same month
+  overwritten, latest 12 kept) and applies the mean. Parsing is regex over `<tr>`/`<td>`; it raises when the month
+  heading is missing, the DB/DC/IRP header order changes, or fewer than 50 rows parse. Past months exist only as
+  PDFs (`https://file.koreainvestment.com/Storage/corporate/elsrate/before3monthYYYYMM.pdf`, 3 months each, some
+  months missing), used once by hand to seed a history, never parsed by the calculator.
 
 ## Conventions
 

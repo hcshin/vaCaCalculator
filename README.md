@@ -175,6 +175,7 @@ $ python3 -m pip install -R pip-requirements
 |------|------|
 | `"strategy"` | 적용할 분산투자 전략 (CA/VA) |
 | `"stockgroups"` | 증권/코인/금현물/현금성 상품그룹 dict |
+| `"date"` (출력 보고서에 자동 기록) | 보고서가 산출된 날짜(`YYYY-MM-DD`).<br>`"KDB"` stockgroup의 이자 계산에 사용되며, 입력 보고서에 `"KDB"` stockgroup이 있는데 `"date"`가 없으면 프로그램이 중단됨(`"PENSION_DEPOSIT"`도 동일). 이 경우 입력 보고서에 해당 보고서를 산출한 날짜를 수동으로 기입. |
 
 #### stockgroups 요소
 | 항목 | 설명 |
@@ -182,7 +183,9 @@ $ python3 -m pip install -R pip-requirements
 | `"KIS"` | 해외/국내 증권에 해당하는 상품들 |
 | `"CoinGecko"` | 코인들.<br>과거 CoinGecko API로 가격정보를 수집하여 CoinGecko라고 명명하였음. 현재는 거래소 API에서 직접 수집(USD: Coinbase, Kraken, Binance.US 중앙값 / KRW: 업비트, 빗썸, 코인원, 코빗 중앙값)하나, 기존 report와의 호환을 위해 이름은 유지. |
 | `"KRX"` | KRX 금현물.<br>주식시장이 아니라 KRX 금시장에 상장되어 거래되는 "금 99.99_1kg" 상품(단위: 원/g).<br>가격은 한국투자 Open API(종목코드 `M04020000`)로 조회하므로 KIS stockgroup이 없더라도 KIS secrets/tokens 파일이 필요함. |
-| `"OTHER"` | 예적금, 현금성 자산 등 가격이 고정돼 있는 상품들.<br>본 프로그램은 이자 등으로 인한 현금성 자산의 가격변동을 추적하지 않음. |
+| `"KDB"` | KDB산업은행 외화정기예금(미화, 1년 만기 후 재예치)에 예치된 달러 현금.<br>계좌 API가 없어 예금별 이자를 추적하지 않고, KDB가 고시한 12개월 거주자 금리를 분기마다 1회씩(오늘, 91일·182일·273일 전) 조회한 평균을 전체 잔액에 적용하여 세후(15.4%) 이자를 근사함. 1년 만기 예금을 여러 시점에 나눠 가입한 경우 각 예금은 가입 시점의 금리를 따르므로 이 평균이 전체 금리의 근사치가 됨.<br>이자는 `"holdings"`가 아닌 `"accruedInterest"`에 누적되어 `"appraisement"`에만 반영됨. 따라서 VA에서는 이자도 다른 상품의 평가이익과 동일하게 취급됨(이자만큼 매수 필요량이 줄고, 매도 신호도 그대로 표시됨. 만기 전 해지가 불가하므로 매도 신호의 실행 여부는 사용자가 판단).<br>이자 계산에 직전 보고서의 `"date"`가 필요함. |
+| `"PENSION_DEPOSIT"` | 한국투자증권 퇴직연금(개인형 IRP) 계좌 내 원화 원리금보장상품(정기예금, ELB, DLB, RP, 이율보증형보험 등). 만기 시 그때 가장 금리가 높은 상품으로 재예치하는 운용을 가정.<br>한국투자증권은 당월 적용금리만 공시하므로([원리금 보장상품 적용금리](https://securities.koreainvestment.com/pension/nwEtcinfo/BizNotice.jsp?cmd=A_NW_32950&templetPopup=Y)), 실행할 때마다 당월의 만기 무관 최고 IRP 적용금리를 해당 상품의 `"rateHistory"`에 월 단위로 기록하고(같은 달 재실행 시 덮어씀, 최근 12개월만 유지) 그 평균을 적용함. 금리 추세를 뒤따르는 근사치이므로 단기 오차가 큼.<br>퇴직연금 계좌 내 이자는 원천징수되지 않으므로(인출 시 과세) 세전 금리를 그대로 적용. `"KDB"`와 마찬가지로 이자는 `"accruedInterest"`에 누적되며 직전 보고서의 `"date"`가 필요함. |
+| `"OTHER"` | 예적금, 현금성 자산 등 가격이 고정돼 있는 상품들.<br>본 프로그램은 이자 등으로 인한 현금성 자산의 가격변동을 추적하지 않음(이자를 반영하려면 `"KDB"` 또는 `"PENSION_DEPOSIT"` stockgroup 사용). |
 
 각 stockgroup은 중첩된 dict 형태로 구성돼 있으며 아래와 같은 요소들을 가집니다.
 
@@ -207,6 +210,8 @@ $ python3 -m pip install -R pip-requirements
 | `"KIS"` | 국내주: 종목코드 6자리 (e.g. KODEX200: 069500), 해외주: ticker 3글자 또는 4글자 (e.g. Vanguard S&P500 Index: VOO) |
 | `"CoinGecko"` | 각 코인별 ticker 3자리.<br>현재 코드는 BTC(Bitcoin), ETH(Ethereum), BNB(Binance Coin)만 지원하나, stockwrapper.py CryptoStock class의 VENUE_SYMBS에 거래소별 심볼을 추가하면 확장 가능 (USD 가격은 최소 2개 거래소 필요) |
 | `"KRX"` | `GLD`. KRX 금현물 하나의 상품을 위한 stockgroup으로서 상품 식별자는 `GLD` 하나만 사용 가능 |
+| `"KDB"` | 상품 식별자에 대한 제약 없음. 단, `"currency"`는 `"USD"`, `"price"`는 1, `"holdings"`는 예치 원금(달러)으로 기재 |
+| `"PENSION_DEPOSIT"` | 상품 식별자에 대한 제약 없음. 단, `"currency"`는 `"KRW"`, `"price"`는 1, `"holdings"`는 예치 원금(원)으로 기재 |
 | `"OTHER"` | 상품 식별자에 대한 제약 없음. OTHER stockgroup 내에서 중복되지만 않는 한 임의의 식별자 사용 가능 |
 
 #### stock 요소
@@ -266,6 +271,9 @@ stockgroup의 종류와 무관하게 모든 stock에 적용 가능한 요소들
 | `"need2investVA"` | VA 방식으로 계산한 투자필요량.<br>기존 `"cumSumCaInvested"` 값에 `"need2investCA"` 값을 더한 것에서 `"appraisement"` 값을 뺀 것으로 결정. |
 | `"need2invest"` | 최종 투자필요량.<br>포트폴리오 파일에 지정된 투자전략에 따라 CA면 `"need2investCA"` 값으로, VA면 `"need2investVA"` 값으로 결정. |
 | `"need2investInUnits"` | 최종 투자필요 수량.<br>`"need2invest"` 값을 각 상품의 현재 단가로 나눈 값과 가장 가까운 정수 값으로 결정. 이 갯수만큼 매수도를 수행하면 된다. |
+| `"interestRate"` (KDB, PENSION_DEPOSIT 한정) | 이번 투자주기의 이자 계산에 적용한 세전 연이율(소수 표기). KDB는 분기별 4회 조회 평균, PENSION_DEPOSIT은 `"rateHistory"`의 평균. |
+| `"rateHistory"` (PENSION_DEPOSIT 한정) | 월별 최고 IRP 적용금리 기록(`"month"`: `YYYY-MM`, `"rate"`: 소수, `"product"`: 상품명과 만기). 최근 12개월 유지.<br>처음 도입할 때 기록이 1건뿐이면 오차가 크므로, 한국투자증권이 매월 올리는 "직전3개월 금리 추이" PDF(공시 페이지의 다운로드 링크)를 참고해 입력 보고서에 과거 기록을 수동으로 채워 둘 수 있음. |
+| `"accruedInterest"` (KDB, PENSION_DEPOSIT 한정) | 누적 이자(상품의 표시통화 기준, 근사치). 직전 보고서의 (원금 + `"accruedInterest"`)에 이율, (1 - 세율), 경과일수/365를 곱한 값이 매 투자주기마다 더해짐(세율: KDB 0.154, PENSION_DEPOSIT 0). 직전 보고서 이후 신규 예치분에는 해당 주기의 이자를 붙이지 않음.<br>예금 명세서로 실제 잔액을 확인했다면 가장 최근 보고서에서 이 값을 "실제 잔액 - `"holdings"`"로 수동 수정하여 근사 오차를 보정할 수 있음. |
 | `"cum_inv_deviation"` | 매 투자주기별 이상적 투자필요량에서 실제 투자량을 뺀 값의 누계.<br>상품의 단가가 큰 경우나, VA투자의 경우 각 투자주기별 투자필요량이 저축액보다 큰 경우가 있으므로 오차가 필연적으로 발생한다. 여러 투자주기에 걸쳐 이 값을 최대한 0에 가깞게 유지하도록 관리하여 이상적인 분산투자에 최대한 가깝게 운용할 수 있다. |
 
 ### 실투자량 입력

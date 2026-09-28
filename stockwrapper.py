@@ -1,10 +1,12 @@
 import logging
 import requests
 import copy
+import html
 import json
+import re
 import time
-from statistics import median
-from datetime import datetime
+from statistics import mean, median
+from datetime import datetime, timedelta
 
 
 logger = logging.getLogger('autoinvestment_logger')
@@ -17,9 +19,9 @@ class BaseStock:
         self.ref_stockgrp_info = ref_stockgrp_info
         self.stockgrp_info = copy.deepcopy(ref_stockgrp_info)  # where new values will be stored
 
-    def _postWrapper(self, URL, headers=None, data=None, verify=True):
+    def _postWrapper(self, URL, headers=None, data=None, verify=True, timeout=None):
         logger.debug(f'POSTing headers {headers} and data {data} to {URL}.')
-        res = requests.post(URL, headers=headers, data=data, verify=verify)
+        res = requests.post(URL, headers=headers, data=data, verify=verify, timeout=timeout)
         logger.debug(f'Got POST response: {res.text}')
 
         return res
@@ -707,3 +709,173 @@ class KrxStock(KisStock):
         self._cross_check_price()  # after _collect_prices
         self._derive_appraisement()
         self._update_ca_invested()  # after _derive_appraisement
+
+
+class DepositStock(BaseStock):
+    # Fixed-term deposits with no account API. Interest is approximated per line with a rate from _get_rate and accrued
+    # into accruedInterest (in the line's currency), never into holdings, so _derive_cum_inv_deviation doesn't count it
+    # as an investment. Subclasses provide _get_rate and INTEREST_TAX_RATE.
+    INTEREST_TAX_RATE = None
+    SUPPORTED_CURRENCIES = ()
+
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, ref_stockgrp_info: dict, days: int):
+        super().__init__(exchange_rate, ref_exchange_rate, ref_stockgrp_info)
+        self.days = days  # days since the ref report was derived
+
+    def _get_rate(self, stockkey: str, stock: dict) -> float:
+        raise NotImplementedError
+
+    def _accrue_interest(self):
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            if stock['currency'] not in self.SUPPORTED_CURRENCIES:
+                error_msg = f'{stockkey}: {type(self).__name__} supports {self.SUPPORTED_CURRENCIES}, but {stock["currency"]} given'
+                logger.error(error_msg)
+                raise NotImplementedError(error_msg)
+
+            rate = self._get_rate(stockkey, stock)
+
+            # interest accrues on the ref balance; deposits made since then earn nothing this period (conservative)
+            ref_stock = self.ref_stockgrp_info['stocks'][stockkey]
+            ref_accrued = ref_stock.get('accruedInterest', 0.0)
+            interest = (ref_stock['holdings'] * ref_stock['price'] + ref_accrued) \
+                * rate * (1 - self.INTEREST_TAX_RATE) * self.days / 365
+            stock['interestRate'] = rate
+            stock['accruedInterest'] = ref_accrued + interest
+            logger.info(f'{stockkey}: {interest:.2f} {stock["currency"]} interest after {self.INTEREST_TAX_RATE:.1%} tax '
+                        f'over {self.days} days at {rate:.4%} pre-tax')
+
+    def _derive_appraisement(self):
+        # principal plus accrued interest, both in the line's currency, then converted to USD
+        for stockkey, stock in self.stockgrp_info['stocks'].items():
+            value = float(stock['holdings']) * float(stock['price']) + stock['accruedInterest']
+            stock['appraisement'] = value / self.exchange_rate if stock['currency'] == 'KRW' else value
+
+    def update_all(self):  # call order is crucial
+        self._update_holdings()
+        self._accrue_interest()  # after _update_holdings, before _derive_appraisement
+        self._derive_appraisement()  # adds accruedInterest
+        self._update_ca_invested()  # after _derive_appraisement
+
+
+class KdbDepositStock(DepositStock):
+    # USD cash kept in KDB 외화정기예금 (1-year time deposits rolled at maturity). The whole line accrues the average of
+    # KDB's posted 12-month rate, sampled once a quarter over the last year. A ladder of 1-year deposits carries the
+    # rates of the dates they were opened, which this average approximates.
+    RATE_URL = 'https://banking.kdb.co.kr/bp/CBADIE06R01.jct'  # backs the public rate page CBADIE06N01.act, no auth
+    RATE_HEADER = {'User-Agent': 'vaCaCalculator', 'X-Requested-With': 'XMLHttpRequest'}
+    RATE_SAMPLE_DAYS_AGO = (0, 91, 182, 273)  # one sample per quarter. a weekend or holiday returns the last effective rate
+    RATE_ROW = {
+        'PRD_IRT_C': '600020020001',  # 외화정기예금
+        'CUR_C': 'USD',
+        'IRT_KD_C': '2004',  # resident (2005: non-resident)
+        'PRV_CRP_TC': '00',
+        'PRD_IRT_STG_TC1': '0012000',  # 12 months and over
+    }
+    INTEREST_TAX_RATE = 0.154  # 이자소득세 14% + 지방소득세 1.4%
+    SUPPORTED_CURRENCIES = ('USD',)
+    REQUEST_TIMEOUT_IN_SECS = 10
+
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, ref_stockgrp_info: dict, days: int):
+        super().__init__(exchange_rate, ref_exchange_rate, ref_stockgrp_info, days)
+        self.avg_rate = None  # the same rate applies to every line; fetched once
+
+    def _get_posted_rate(self, querydate: datetime) -> float:
+        # the posted 12-month rate in effect on querydate, as a fraction
+        res = self._postWrapper(KdbDepositStock.RATE_URL, KdbDepositStock.RATE_HEADER,
+                                {'_JSON_': json.dumps({'BSE_DT': querydate.strftime('%Y%m%d')})},
+                                timeout=KdbDepositStock.REQUEST_TIMEOUT_IN_SECS)
+        res.raise_for_status()
+
+        for row in res.json().get('REC', []):
+            if all(row.get(key) == value for key, value in KdbDepositStock.RATE_ROW.items()):
+                try:
+                    rate = float(row['IRT_BSE_VL']) / 100
+                except (KeyError, TypeError, ValueError):
+                    error_msg = f'invalid KDB rate for {querydate:%Y-%m-%d}: {row.get("IRT_BSE_VL")}'
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+                logger.info(f'KDB USD 12-month rate on {querydate:%Y-%m-%d} (effective {row.get("ALY_STT_DT")}): {rate:.4%}')
+                return rate
+
+        error_msg = f'no KDB USD 12-month rate for {querydate:%Y-%m-%d} in the response'
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    def _get_rate(self, stockkey: str, stock: dict) -> float:
+        if self.avg_rate is None:
+            today = datetime.today()
+            self.avg_rate = mean(self._get_posted_rate(today - timedelta(days=days_ago))
+                                 for days_ago in KdbDepositStock.RATE_SAMPLE_DAYS_AGO)
+        return self.avg_rate
+
+
+class PensionDepositStock(DepositStock):
+    # KRW held in 원리금보장 products of a 한국투자 퇴직연금 (개인형 IRP) account; the highest-paying product is picked at each
+    # rollover. KIS posts only the current month's rates, so each run records the month's highest IRP rate over every
+    # product and maturity into the line's rateHistory (one entry per month, latest HISTORY_LEN kept) and applies the
+    # mean. This is a trend-following approximation with high short-term error, hence a group of its own.
+    RATE_URL = 'https://securities.koreainvestment.com/pension/nwEtcinfo/BizNotice.jsp'
+    RATE_PARAMS = {'cmd': 'A_NW_32950', 'templetPopup': 'Y'}  # the popup variant is the same tables without site chrome
+    RATE_HEADER = {'User-Agent': 'vaCaCalculator'}
+    MONTH_PATTERN = re.compile(r'금리\s*적용일자\s*:\s*(\d{4})-(\d{2})-\d{2}')
+    RATE_COLUMNS = ('DB', 'DC', 'IRP')  # rate columns after 상품명, 만기
+    RATE_COLUMN = 'IRP'
+    MIN_ROWS = 50  # ~300 rows are posted; fewer means the page changed
+    HISTORY_LEN = 12
+    INTEREST_TAX_RATE = 0.0  # interest inside a pension account isn't withheld; it's taxed at withdrawal
+    SUPPORTED_CURRENCIES = ('KRW',)
+    REQUEST_TIMEOUT_IN_SECS = 10
+
+    def __init__(self, exchange_rate: float, ref_exchange_rate: float, ref_stockgrp_info: dict, days: int):
+        super().__init__(exchange_rate, ref_exchange_rate, ref_stockgrp_info, days)
+        self.posted = None  # (month, rate, product) of this month's highest posted rate; fetched once
+
+    def _get_posted_max(self) -> tuple:
+        res = self._getWrapper(PensionDepositStock.RATE_URL, PensionDepositStock.RATE_HEADER, PensionDepositStock.RATE_PARAMS,
+                               timeout=PensionDepositStock.REQUEST_TIMEOUT_IN_SECS)
+        res.raise_for_status()
+        page = res.text
+
+        month_match = PensionDepositStock.MONTH_PATTERN.search(page)
+        if month_match is None:
+            error_msg = 'no 금리 적용일자 on the KIS 원리금보장 rate page'
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        month = f'{month_match.group(1)}-{month_match.group(2)}'
+
+        headers = [re.sub(r'<[^>]+>', '', th).strip() for th in re.findall(r'<th[^>]*>(.*?)</th>', page, re.S)]
+        rate_columns = tuple(h for h in headers if h in PensionDepositStock.RATE_COLUMNS)
+        if rate_columns[:3] != PensionDepositStock.RATE_COLUMNS:
+            error_msg = f'unexpected rate columns on the KIS 원리금보장 rate page: {rate_columns[:3]}'
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        rate_idx = 2 + PensionDepositStock.RATE_COLUMNS.index(PensionDepositStock.RATE_COLUMN)
+
+        rows = []
+        for tr in re.findall(r'<tr[^>]*>(.*?)</tr>', page, re.S):
+            tds = [html.unescape(re.sub(r'<[^>]+>', '', td)).strip() for td in re.findall(r'<td[^>]*>(.*?)</td>', tr, re.S)]
+            if len(tds) > rate_idx and re.fullmatch(r'\d+(\.\d+)?', tds[rate_idx]):
+                rows.append((float(tds[rate_idx]) / 100, f'{tds[0]} {tds[1]}'))
+        if len(rows) < PensionDepositStock.MIN_ROWS:
+            error_msg = f'only {len(rows)} rates on the KIS 원리금보장 rate page, expected at least {PensionDepositStock.MIN_ROWS}'
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        rate, product = max(rows)
+        logger.info(f'Highest KIS 원리금보장 {PensionDepositStock.RATE_COLUMN} rate for {month}: {rate:.2%} ({product}), '
+                    f'out of {len(rows)} products')
+        return month, rate, product
+
+    def _get_rate(self, stockkey: str, stock: dict) -> float:
+        if self.posted is None:
+            self.posted = self._get_posted_max()
+        month, rate, product = self.posted
+
+        history = {entry['month']: entry for entry in stock.get('rateHistory', [])}
+        history[month] = {'month': month, 'rate': rate, 'product': product}  # a rerun in the same month overwrites
+        stock['rateHistory'] = [history[m] for m in sorted(history)][-PensionDepositStock.HISTORY_LEN:]
+
+        avg_rate = mean(entry['rate'] for entry in stock['rateHistory'])
+        logger.info(f'{stockkey}: mean of {len(stock["rateHistory"])} monthly rates '
+                    f'({stock["rateHistory"][0]["month"]} … {month}): {avg_rate:.4%}')
+        return avg_rate
