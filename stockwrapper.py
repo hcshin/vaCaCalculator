@@ -35,27 +35,40 @@ class BaseStock:
 
     def _update_ca_invested(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
-            # utilize ref_stockgrp_info to derive cumSumCaInvested for this report
+            # utilize ref_stockgrp_info to derive cumSumIdealInvested for this report
             # N.B. need2investCA has nothing to do with actual invested amount of each stock it's just an ideal guideline for deriving VA amount
             #       Even if we didn't followed the guideline its trajectory remains unaltered (so that we can eventually persue the ideal goal)
             ref_stock = self.ref_stockgrp_info['stocks'][stockkey]
-            if 'cumSumCaInvested' not in ref_stock.keys():
-                # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
-                # use appraisement as previous cumSumCaInvested
-                # N.B. this route is only for the 1st report because reports afterward all have cumSumCaInvested
-                if 'cumSumCaInvestedInKRW' not in ref_stock.keys() and 'cumSumCaInvestedInUSD' not in ref_stock.keys():
-                    stock['cumSumCaInvested'] = stock['appraisement']
-                # in case either cumSumCaInvestedInKRW or cumSumCaInvestedInUSD exists, use them instead
+            if 'cumSumIdealInvested' not in ref_stock.keys():
+                # in case of neither cumSumIdealInvested, cumSumIdealInvestedInKRW, nor cumSumIdealInvestedInUSD exists
+                # use appraisement as previous cumSumIdealInvested
+                # N.B. this route is only for the 1st report because reports afterward all have cumSumIdealInvested
+                if 'cumSumIdealInvestedInKRW' not in ref_stock.keys() and 'cumSumIdealInvestedInUSD' not in ref_stock.keys():
+                    stock['cumSumIdealInvested'] = stock['appraisement']
+                # in case either cumSumIdealInvestedInKRW or cumSumIdealInvestedInUSD exists, use them instead
                 else:
-                    stock['cumSumCaInvested'] = 0.0
-                    if 'cumSumCaInvestedInKRW' in ref_stock.keys():
-                        stock['cumSumCaInvested'] += ref_stock['cumSumCaInvestedInKRW'] / self.exchange_rate
-                        del stock['cumSumCaInvestedInKRW']
-                    if 'cumSumCaInvestedInUSD' in ref_stock.keys():
-                        stock['cumSumCaInvested'] += ref_stock['cumSumCaInvestedInUSD']
-                        del stock['cumSumCaInvestedInUSD']
+                    stock['cumSumIdealInvested'] = 0.0
+                    if 'cumSumIdealInvestedInKRW' in ref_stock.keys():
+                        stock['cumSumIdealInvested'] += ref_stock['cumSumIdealInvestedInKRW'] / self.exchange_rate
+                        del stock['cumSumIdealInvestedInKRW']
+                    if 'cumSumIdealInvestedInUSD' in ref_stock.keys():
+                        stock['cumSumIdealInvested'] += ref_stock['cumSumIdealInvestedInUSD']
+                        del stock['cumSumIdealInvestedInUSD']
             else:
-                stock['cumSumCaInvested'] = ref_stock['cumSumCaInvested'] + ref_stock['need2investCA']
+                # advance by the ideal increment ref_report was derived with: need2investRebal if it was a rebalancing step,
+                # need2investCA otherwise. Portfolio deletes the other one from each derived report
+                if 'need2investRebal' in ref_stock.keys() and 'need2investCA' in ref_stock.keys():
+                    error_msg = f'{stockkey} has both need2investRebal and need2investCA. keep only the one the report was derived with'
+                    logger.error(error_msg)
+                    raise KeyError(error_msg)
+                elif 'need2investRebal' in ref_stock.keys():
+                    stock['cumSumIdealInvested'] = ref_stock['cumSumIdealInvested'] + ref_stock['need2investRebal']
+                elif 'need2investCA' in ref_stock.keys():
+                    stock['cumSumIdealInvested'] = ref_stock['cumSumIdealInvested'] + ref_stock['need2investCA']
+                else:
+                    error_msg = f'{stockkey} has cumSumIdealInvested but neither need2investCA nor need2investRebal to advance it'
+                    logger.error(error_msg)
+                    raise KeyError(error_msg)
 
     def _update_holdings(self):
         for stockkey, stock in self.stockgrp_info['stocks'].items():
@@ -281,7 +294,7 @@ class KisStock(BaseStock):
         self.CANO, self.ACNT_PRDT_CD = self.stockgrp_info['accountNo'].split('-')
 
         # N.B. although KIS API supports collection of actual invested amount of each stock, we only collect the holdings
-        # because this is different from cumSumCaInvested which represents cum sum of invested amount determined by CA
+        # because this is different from cumSumIdealInvested which represents cum sum of the ideal invested amount (CA or rebalancing)
         # In contrast what KIS API offers is the result of VA, which practically mixes up CA as well)
 
         if self.ACNT_PRDT_CD == '29':

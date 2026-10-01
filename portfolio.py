@@ -16,6 +16,13 @@ class Portfolio:
     EXCHANGERATE_LOOKUP_DATA = 'AP01'
     # resolve relative to this module so the tool can be run from any cwd
     EXCHANGERATE_CERT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'koreaexim.pem')
+    # stock keys renamed when rebalancing was introduced. old reports are migrated on load
+    LEGACY_STOCK_KEYS = {
+        'weight': 'targ_weight',
+        'cumSumCaInvested': 'cumSumIdealInvested',
+        'cumSumCaInvestedInKRW': 'cumSumIdealInvestedInKRW',
+        'cumSumCaInvestedInUSD': 'cumSumIdealInvestedInUSD',
+    }
 
     def __init__(self, *args) -> None:
         # constructor 1: simple constructor just for printing ref_report
@@ -25,6 +32,7 @@ class Portfolio:
 
             with open(ref_report_fname, 'r') as f:
                 self.ref_report = json.load(f)
+            self._migrate_legacy_keys(self.ref_report)
         # constructor 2: regular constructor for deriving new reports
         elif (
                len(args) == 5 and
@@ -55,20 +63,50 @@ class Portfolio:
 
                 # refer to root_ref_report.json for report format
                 self.ref_report = json.load(f)
+                self._migrate_legacy_keys(self.ref_report)
 
                 # start verifying
-                # sum of all weights of all stocks should be equal to 1.0
+                # sum of all target weights of all stocks should be equal to 1.0
                 stock_sum_of_weights = 0.0
                 for stockgroup in self.ref_report['stockgroups'].values():
                     for stock in stockgroup['stocks'].values():
-                        stock_sum_of_weights += stock['weight']
+                        stock_sum_of_weights += stock['targ_weight']
                 assert round(stock_sum_of_weights, 4) == 1.0
+                self._validate_rebalance()
 
                 # instantiate this_report
                 self.this_report = {}
         else:
             logger.error('wrong form of Portfolio constructor called')
             raise TypeError
+
+    @staticmethod
+    def _migrate_legacy_keys(report: dict):
+        # rename legacy stock keys in place, keeping the key order
+        for stockgroup in report['stockgroups'].values():
+            for stockkey, stock in list(stockgroup['stocks'].items()):
+                for old_key, new_key in Portfolio.LEGACY_STOCK_KEYS.items():
+                    if old_key in stock.keys() and new_key in stock.keys():
+                        error_msg = f'{stockkey} has both {old_key} (legacy) and {new_key}. keep only {new_key}'
+                        logger.error(error_msg)
+                        raise KeyError(error_msg)
+
+                stockgroup['stocks'][stockkey] = {Portfolio.LEGACY_STOCK_KEYS.get(key, key): value for key, value in stock.items()}
+
+    def _validate_rebalance(self):
+        rebalance = self.ref_report.get('rebalance', False)
+        if not isinstance(rebalance, bool):
+            error_msg = f'rebalance must be true or false, but {rebalance!r} given'
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        if rebalance:
+            steps_left = self.ref_report.get('rebalanceStepsLeft')
+            # N.B. bool is a subclass of int
+            if not isinstance(steps_left, int) or isinstance(steps_left, bool) or steps_left < 1:
+                error_msg = f'rebalance is on, so rebalanceStepsLeft must be an integer >= 1, but {steps_left!r} given'
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
     def _get_exchange_rate(self) -> float:
         querydate = datetime.today()
@@ -126,6 +164,15 @@ class Portfolio:
 
             self.this_report['total_appraisement'] = total_appraisement
 
+    def _derive_cur_weight(self):
+        # current weight of each stock at derivation time (before this period's trades)
+        for stockgroup in self.this_report['stockgroups'].values():
+            for stock in stockgroup['stocks'].values():
+                if self.this_report['total_appraisement'] != 0:
+                    stock['cur_weight'] = stock['appraisement'] / self.this_report['total_appraisement']
+                else:
+                    stock['cur_weight'] = 0.0
+
     def _print_report(self, report_to_print: dict):
         logger.debug('_print_report called')
 
@@ -136,16 +183,18 @@ class Portfolio:
             raise KeyError(error_msg)
 
         print(f'Strategy: {report_to_print["strategy"]}')
+        if report_to_print.get('rebalance', False):
+            print(f'Rebalance: on, {report_to_print["rebalanceStepsLeft"]} step(s) left')
         print(f'Total Appraisement: {report_to_print["total_appraisement"]:.2f}')
 
         table_header = ('stock',
                         'priceUsd',
                         'holdings',
                         'appraisement',
-                        'cumSumCaInvested',
+                        'cumSumIdealInvested',
                         'need2invest',
                         'need2investInUnits',
-                        'targetweight',
+                        'targ_weight',
                         'cur_weight',
                         'cum_inv_deviation'
                         )
@@ -170,13 +219,15 @@ class Portfolio:
                     if 'holdings' in stock.keys() else 'N/A',
                     f'{stock["appraisement"]:.2f}'
                     if 'appraisement' in stock.keys() else 'N/A',
-                    f'{stock["cumSumCaInvested"]:.2f}'
-                    if 'cumSumCaInvested' in stock.keys() else 'N/A',
+                    f'{stock["cumSumIdealInvested"]:.2f}'
+                    if 'cumSumIdealInvested' in stock.keys() else 'N/A',
                     f'{stock["need2invest"]:.2f}'
                     if 'need2invest' in stock.keys() else 'N/A',
                     f'{stock["need2investInUnits"]}'
                     if 'need2investInUnits' in stock.keys() else 'N/A',
-                    stock['weight'],
+                    stock['targ_weight'],
+                    f'{stock["cur_weight"]:.2f}'
+                    if 'cur_weight' in stock.keys() else  # reports derived before cur_weight was stored
                     f'{stock["appraisement"] / report_to_print["total_appraisement"]:.2f}'
                     if report_to_print["total_appraisement"] != 0 else '0',
                     f'{stock["cum_inv_deviation"]:.2f}'
@@ -259,46 +310,76 @@ class Portfolio:
         # get CA amount for each stock
         for stockgroupkey, stockgroup in self.this_report['stockgroups'].items():
             for stockkey, stock in stockgroup['stocks'].items():
-                stock['need2investCA'] = self.this_report['saving'] * stock['weight']
+                stock['need2investCA'] = self.this_report['saving'] * stock['targ_weight']
+                # need2investRebal copied over from a rebalancing ref_report must not advance the next cumSumIdealInvested
+                if 'need2investRebal' in stock.keys():
+                    del stock['need2investRebal']
 
-                if 'cumSumCaInvested' in stock.keys():
-                    # in case cumSumCaInvested is given, ignore cumSumCaInvestedInKRW and cumSumCaInvestedInUSD
-                    if 'cumSumCaInvestedInKRW' in stock.keys():
-                        del stock['cumSumCaInvestedInKRW']
-                    if 'cumSumCaInvestedInUSD' in stock.keys():
-                        del stock['cumSumCaInvestedInUSD']
+                if 'cumSumIdealInvested' in stock.keys():
+                    # in case cumSumIdealInvested is given, ignore cumSumIdealInvestedInKRW and cumSumIdealInvestedInUSD
+                    if 'cumSumIdealInvestedInKRW' in stock.keys():
+                        del stock['cumSumIdealInvestedInKRW']
+                    if 'cumSumIdealInvestedInUSD' in stock.keys():
+                        del stock['cumSumIdealInvestedInUSD']
                 else:
-                    # in case of neither cumSumCaInvested, cumSumCaInvestedInKRW, nor cumSumCaInvestedInUSD exists
-                    # use appraisement as previous cumSumCaInvested
-                    # N.B. this route is only for the 1st report because reports afterward all have cumSumCaInvested
-                    if 'cumSumCaInvestedInKRW' not in stock.keys() and 'cumSumCaInvestedInUSD' not in stock.keys():
-                        stock['cumSumCaInvested'] = stock['appraisement'] + stock['need2investCA']
-                    # in case either cumSumCaInvestedInKRW or cumSumCaInvestedInUSD exists, use them instead
+                    # in case of neither cumSumIdealInvested, cumSumIdealInvestedInKRW, nor cumSumIdealInvestedInUSD exists
+                    # use appraisement as previous cumSumIdealInvested
+                    # N.B. this route is only for the 1st report because reports afterward all have cumSumIdealInvested
+                    if 'cumSumIdealInvestedInKRW' not in stock.keys() and 'cumSumIdealInvestedInUSD' not in stock.keys():
+                        stock['cumSumIdealInvested'] = stock['appraisement'] + stock['need2investCA']
+                    # in case either cumSumIdealInvestedInKRW or cumSumIdealInvestedInUSD exists, use them instead
                     else:
-                        stock['cumSumCaInvested'] = stock['need2investCA']
-                        if 'cumSumCaInvestedInKRW' in stock.keys():
-                            stock['cumSumCaInvested'] += stock['cumSumCaInvestedInKRW'] / self.exchange_rate
-                            del stock['cumSumCaInvestedInKRW']
-                        if 'cumSumCaInvestedInUSD' in stock.keys():
-                            stock['cumSumCaInvested'] += stock['cumSumCaInvestedInUSD']
-                            del stock['cumSumCaInvestedInUSD']
+                        stock['cumSumIdealInvested'] = stock['need2investCA']
+                        if 'cumSumIdealInvestedInKRW' in stock.keys():
+                            stock['cumSumIdealInvested'] += stock['cumSumIdealInvestedInKRW'] / self.exchange_rate
+                            del stock['cumSumIdealInvestedInKRW']
+                        if 'cumSumIdealInvestedInUSD' in stock.keys():
+                            stock['cumSumIdealInvested'] += stock['cumSumIdealInvestedInUSD']
+                            del stock['cumSumIdealInvestedInUSD']
 
                 stock['need2invest'] = stock['need2investCA']
 
-    def _distribute_saving_VA(self):
-        # do CA first
-        self._distribute_saving_CA()
+    def _distribute_saving_rebal(self, steps_left: int):
+        # during rebalancing need2investRebal replaces need2investCA: it deploys the saving by targ_weight and closes
+        # 1/steps_left of the gap to targ_weight, so the gap is closed after steps_left reports whatever the saving is.
+        # the gap is measured on what each strategy steers to:
+        #   VA: cumSumIdealInvested (ideal trajectory). need2investVA = cumSumIdealInvested + need2investRebal - appraisement
+        #       turns the rebalanced trajectory into trades at current prices. measuring on appraisement would correct
+        #       price deviations twice and leave the trajectory off target after rebalancing.
+        #   CA: appraisement. CA never steers holdings to cumSumIdealInvested, so its shares say nothing about the portfolio
+        # N.B. the gaps sum to zero, so the sum of need2investRebal is the saving
+        if self.this_report['strategy'] == 'VA':
+            basis_key = 'cumSumIdealInvested'
+        else:
+            basis_key = 'appraisement'
 
-        # get VA amount for each stock
+        basis_total = 0.0
+        for stockgroup in self.this_report['stockgroups'].values():
+            for stock in stockgroup['stocks'].values():
+                basis_total += stock[basis_key]
+
+        for stockgroupkey, stockgroup in self.this_report['stockgroups'].items():
+            for stockkey, stock in stockgroup['stocks'].items():
+                stock['need2investRebal'] = \
+                    self.this_report['saving'] * stock['targ_weight'] + \
+                    (stock['targ_weight'] * basis_total - stock[basis_key]) / steps_left
+                # need2investCA copied over from ref_report must not advance the next cumSumIdealInvested
+                if 'need2investCA' in stock.keys():
+                    del stock['need2investCA']
+
+                stock['need2invest'] = stock['need2investRebal']
+
+    def _distribute_saving_VA(self, increment_key: str):
+        # get VA amount for each stock. _distribute_saving_CA or _distribute_saving_rebal must be called first
         for stockgroupkey, stockgroup in self.this_report['stockgroups'].items():
             for stockkey, stock in stockgroup['stocks'].items():
                 # derive VA amount
-                #   cumSumCaInvested: cumulative sum of CA invested amount.
-                #                     this has nothing to do with actual investment because this is an ideal target to follow
-                #   need2investCA: the CA amount needed to be invested in the corresponding stock
+                #   cumSumIdealInvested: cumulative sum of ideal invested amount (need2investCA, or need2investRebal while rebalancing)
+                #                        this has nothing to do with actual investment because this is an ideal target to follow
+                #   increment_key: need2investCA (or need2investRebal) for this period, the ideal increment of the trajectory
                 #                  this also has nothing to do with actual investment
                 #   need2investVA: difference between ideal target from current actual appraisement
-                stock['need2investVA'] = stock['cumSumCaInvested'] + stock['need2investCA'] - stock['appraisement']
+                stock['need2investVA'] = stock['cumSumIdealInvested'] + stock[increment_key] - stock['appraisement']
 
                 # overwrite need2invest as need2investVA
                 stock['need2invest'] = stock['need2investVA']
@@ -316,6 +397,14 @@ class Portfolio:
 
         # derive common stuffs
         self.this_report['strategy'] = self.ref_report['strategy']
+        # rebalance in ref_report means this report is a rebalancing step. one step is consumed per derived report
+        rebalancing = self.ref_report.get('rebalance', False)
+        if rebalancing:
+            self.this_report['rebalanceStepsLeft'] = self.ref_report['rebalanceStepsLeft'] - 1
+            self.this_report['rebalance'] = self.this_report['rebalanceStepsLeft'] > 0
+        else:
+            self.this_report['rebalanceStepsLeft'] = self.ref_report.get('rebalanceStepsLeft', 0)
+            self.this_report['rebalance'] = False
         self.this_report['saving'] = self.saving
         self.this_report['savingInKRW'] = self.savingInKRW
         self.this_report['savingInUSD'] = self.savingInUSD
@@ -376,21 +465,29 @@ class Portfolio:
             stockgroup_handler.update_all()
             self.this_report['stockgroups'][stockgroupkey] = stockgroup_handler.get_stockgrp()
 
+        # derive total_appraisement and current weights (rebalancing under CA needs total_appraisement)
+        self._derive_total_appraisement()
+        self._derive_cur_weight()
+
         # distribute saving according to the strategy
-        if self.this_report['strategy'] == 'CA':
-            self._distribute_saving_CA()
-        elif self.this_report['strategy'] == 'VA':
-            self._distribute_saving_VA()
-        else:
+        if self.this_report['strategy'] not in ('CA', 'VA'):
             logger.error('Only supports CA and VA for strategy')
             raise NotImplementedError
+
+        # the ideal increment: need2investCA, replaced by need2investRebal while rebalancing
+        if rebalancing:
+            self._distribute_saving_rebal(self.ref_report['rebalanceStepsLeft'])
+            increment_key = 'need2investRebal'
+        else:
+            self._distribute_saving_CA()
+            increment_key = 'need2investCA'
+
+        if self.this_report['strategy'] == 'VA':
+            self._distribute_saving_VA(increment_key)
         self._derive_units_to_invest()
 
         # derive cumulative deviation from need2invest
         self._derive_cum_inv_deviation()
-
-        # derive total_appraisement
-        self._derive_total_appraisement()
 
     def write_report_to_file(self, fname: str):
         with open(fname, 'w') as ofile:

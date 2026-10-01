@@ -54,14 +54,28 @@ so report files form a chain. The README documents the shape of the initial (see
 2. `handler.update_all()` — **each subclass overrides this and the call order inside is a hard
    contract** (holdings → prices → `_derive_appraisement` → `_update_ca_invested`); the comments
    marking the ordering are load-bearing, they encode a fixed bug (commit b4180fb).
-3. Strategy: `_distribute_saving_CA` sets `need2investCA = saving * weight`; `_distribute_saving_VA`
-   runs CA first, then `need2investVA = cumSumCaInvested + need2investCA - appraisement`.
-4. `_derive_units_to_invest` rounds to whole units except for `CoinGecko`, which stays fractional.
-5. `_derive_cum_inv_deviation` diffs the reference report's `need2invest` against holdings actually
+3. `_derive_total_appraisement` + `_derive_cur_weight` (CA rebalancing needs the total).
+4. The ideal increment: `_distribute_saving_CA` sets `need2investCA = saving * targ_weight`, or, when the
+   ref report has `rebalance: true`, `_distribute_saving_rebal` sets `need2investRebal` instead (below).
+   Each deletes the other field, copied over from the ref report. Then for VA, `_distribute_saving_VA(increment_key)`
+   sets `need2investVA = cumSumIdealInvested + <increment> - appraisement`.
+5. `_derive_units_to_invest` rounds to whole units except for `CoinGecko`, which stays fractional.
+6. `_derive_cum_inv_deviation` diffs the reference report's `need2invest` against holdings actually
    gained, accumulating `cum_inv_deviation`.
 
-**`cumSumCaInvested` is an ideal trajectory, not actual money spent.** It only ever advances as
-`previous cumSumCaInvested + previous need2investCA`, deliberately decoupled from real
+**Rebalancing** moves the portfolio to new `targ_weight`s over a fixed number of reports (`rebalanceStepsLeft`,
+decremented per derived report, `rebalance` cleared at 0; a zero-saving run still counts as a step). With k steps
+left: `need2investRebal = saving * w + (w * Σbasis - basis) / k`, so Σ`need2investRebal` = saving. The basis is
+`cumSumIdealInvested` under VA (VA's own `cumSum - appraisement` term turns the trajectory into trades; an
+appraisement basis would correct price moves twice and leave the trajectory off target) and `appraisement` under
+CA (CA never steers holdings to the trajectory). Under VA the steps are equal and the trajectory lands exactly on
+target at k = 1. The user starts a rebalance by hand-editing the latest report (new `targ_weight`s,
+`rebalance: true`, `rebalanceStepsLeft: M`).
+
+**`cumSumIdealInvested` is an ideal trajectory, not actual money spent.** It only ever advances as
+`previous cumSumIdealInvested + previous need2investCA` (or `+ previous need2investRebal` when the
+previous report was a rebalancing step — `_update_ca_invested` raises if a ref stock has both or neither),
+deliberately decoupled from real
 purchases/sales (see the long commit message on 5dcd12a). Do not "fix" it to track actual
 investment — that causes over-selling under VA. Real trades enter through `holdings`: for non-KIS
 groups the user hand-edits `actualInvestedInUnits` into the report and `_update_holdings` folds it
@@ -69,14 +83,19 @@ into `holdings` and deletes it; KIS holdings come from the API and any `actualIn
 is warned about and dropped. KIS holdings are reset to 0 before the balance query, since a fully sold
 stock isn't returned by the API.
 
-Bootstrapping (first report only): when a stock has none of `cumSumCaInvested`,
-`cumSumCaInvestedInKRW`, `cumSumCaInvestedInUSD`, current appraisement is used as the seed;
+Bootstrapping (first report only): when a stock has none of `cumSumIdealInvested`,
+`cumSumIdealInvestedInKRW`, `cumSumIdealInvestedInUSD`, current appraisement is used as the seed;
 the `*InKRW`/`*InUSD` variants are converted, summed, and deleted. This branch exists in both
 `BaseStock._update_ca_invested` and `Portfolio._distribute_saving_CA` — keep them in sync.
-All amounts in a report must be USD; a KRW figure left in `cumSumCaInvested` is silently
+All amounts in a report must be USD; a KRW figure left in `cumSumIdealInvested` is silently
 accepted and corrupts `need2investVA`.
 
-`weight` is a whole-portfolio weight, not per-group; the constructor asserts the weights sum to 1.0.
+`targ_weight` is a whole-portfolio weight, not per-group; the constructor asserts the weights sum to 1.0.
+`cur_weight` is derived (appraisement share before this period's trades).
+
+Legacy keys: reports from before rebalancing use `weight` and `cumSumCaInvested[InKRW|InUSD]`.
+`Portfolio._migrate_legacy_keys` renames them on load (both constructors, so old reports still print)
+and raises if a stock has both the old and the new name.
 
 ## External API gotchas
 
